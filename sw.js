@@ -1,5 +1,5 @@
-// Diwan Market Floor Supervisor - Unified Service Worker (PWA + FCM Web Push + Background Calling v12)
-const CACHE_NAME = 'diwan-supervisor-v12';
+// Diwan Market Floor Supervisor - Unified Service Worker (PWA + FCM Web Push + Background Calling v13)
+const CACHE_NAME = 'diwan-supervisor-v13';
 
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');

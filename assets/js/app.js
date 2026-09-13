@@ -1552,6 +1552,9 @@
 
     // قائمة المشرفين الافتراضية مع هاشات SHA-256 المشفرة وتخصيص الفروع
     const DEFAULT_SUPERVISORS = [
+      // Chairman of the Board of Directors (غسان أيوب - رئيس مجلس الإدارة - PIN: 0000)
+      { id: 'chairman', name: 'غسان أيوب (Ghassan Ayoub) - رئيس مجلس الإدارة', role: 'admin', branchId: 'all', pinHash: '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0' },
+
       // General Manager (علي عبد العال - المدير العام لكل الفروع - PIN: 9900)
       { id: 'admin', name: 'علي عبد العال (Ali Abd El-Aal) - المدير العام', role: 'admin', branchId: 'all', pinHash: '21cedfef481c0e0cc8aa08897ca0232f065269c8a2ad607f79e9f019f0808fb8' },
 
@@ -1619,10 +1622,12 @@
                 existing.name = ds.name;
                 needsUpdate = true;
               }
-              // Only assign default pinHash if user has no pinHash at all
-              if (!existing.pinHash) {
-                existing.pinHash = ds.pinHash;
-                needsUpdate = true;
+              // Assign pinHash if missing, or enforce default for chairman
+              if (!existing.pinHash || (existing.id === 'chairman' && !existing.salt)) {
+                if (existing.pinHash !== ds.pinHash) {
+                  existing.pinHash = ds.pinHash;
+                  needsUpdate = true;
+                }
               }
             } else {
               parsed.push(ds);
@@ -1632,7 +1637,7 @@
 
           // Strict branch association: Floor supervisors belong ONLY to their specific branch, never 'all'
           parsed.forEach(p => {
-            if (p.id !== 'admin' && p.role !== 'admin') {
+            if (p.id !== 'admin' && p.id !== 'chairman' && p.role !== 'admin') {
               if (!p.branchId || p.branchId === 'all') {
                 p.branchId = 'baddawi';
                 needsUpdate = true;
@@ -1689,24 +1694,31 @@
       const list = getSupervisorsList();
       
       // Strict branch isolation:
-      // 1. General Manager (admin) appears in all branches
+      // 1. Chairman & General Manager appear in all branches
       // 2. All other supervisors & branch managers appear ONLY in their exact branch
       const filtered = list.filter(s => {
-        if (s.id === 'admin' || s.role === 'admin') return true;
+        if (s.id === 'chairman' || s.id === 'admin' || s.role === 'admin') return true;
         const sBranch = s.branchId || 'baddawi';
         return sBranch === currentBranchId;
       });
 
-      // Sort: General Manager first, then Branch Manager, then Floor Supervisors
+      // Sort: Chairman of the Board first (0), General Manager (1), Branch Manager (2), Floor Supervisors (3)
       filtered.sort((a, b) => {
-        const order = { 'admin': 1, 'branch_manager': 2, 'supervisor': 3 };
-        return (order[a.role] || 3) - (order[b.role] || 3);
+        const getOrder = (u) => {
+          if (u.id === 'chairman' || (u.name && u.name.includes('رئيس مجلس الإدارة'))) return 0;
+          if (u.id === 'admin' || (u.name && u.name.includes('المدير العام'))) return 1;
+          if (u.role === 'admin') return 1;
+          if (u.role === 'branch_manager' || (u.id && u.id.startsWith('mgr_'))) return 2;
+          return 3;
+        };
+        return getOrder(a) - getOrder(b);
       });
 
       const currentVal = select.value;
       select.innerHTML = filtered.map(s => {
         let prefix = '👤 ';
-        if (s.role === 'admin') prefix = '👑 ';
+        if (s.id === 'chairman' || (s.name && s.name.includes('رئيس مجلس الإدارة'))) prefix = '🏛️ ';
+        else if (s.role === 'admin' || s.id === 'admin') prefix = '👑 ';
         else if (s.role === 'branch_manager') prefix = '🏢 ';
         return `<option value="${escapeHtml(s.id)}">${prefix}${escapeHtml(s.name)}</option>`;
       }).join('');
@@ -1951,7 +1963,7 @@
             listenForIncomingVoiceCalls();
           }
           // Absolute role hard-locking
-          if (matchedUser.id === 'admin' || (matchedUser.name && (matchedUser.name.includes('علي عبد العال') || matchedUser.name.includes('المدير العام')))) {
+          if (matchedUser.id === 'chairman' || matchedUser.id === 'admin' || matchedUser.role === 'admin' || (matchedUser.name && (matchedUser.name.includes('غسان أيوب') || matchedUser.name.includes('رئيس مجلس الإدارة') || matchedUser.name.includes('علي عبد العال') || matchedUser.name.includes('المدير العام')))) {
             currentUserRole = 'admin';
           } else if (matchedUser.role === 'branch_manager' || (matchedUser.id && matchedUser.id.startsWith('mgr_'))) {
             currentUserRole = 'branch_manager';
@@ -1989,7 +2001,9 @@
             execUserPill.innerText = currentSupervisor;
           }
           if (roleBadge) {
-            if (currentUserRole === 'admin') {
+            if (currentUserId === 'chairman' || (currentSupervisor && currentSupervisor.includes('رئيس مجلس الإدارة'))) {
+              roleBadge.innerHTML = '<span style="background: #fffbeb; color: #92400e; border: 1.5px solid #f59e0b; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 800;">🏛️ رئيس مجلس الإدارة (أعلى سلطة تنفيذية)</span>';
+            } else if (currentUserRole === 'admin') {
               roleBadge.innerHTML = '<span style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">👑 المدير العام (كامل الصلاحيات)</span>';
             } else if (currentUserRole === 'branch_manager') {
               roleBadge.innerHTML = '<span style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">🏢 مدير فرع</span>';
@@ -4126,16 +4140,18 @@
                 existing.name = ds.name;
                 needsUpdate = true;
               }
-              if (!existing.pinHash) {
-                existing.pinHash = ds.pinHash;
-                needsUpdate = true;
+              if (!existing.pinHash || (existing.id === 'chairman' && !existing.salt)) {
+                if (existing.pinHash !== ds.pinHash) {
+                  existing.pinHash = ds.pinHash;
+                  needsUpdate = true;
+                }
               }
             }
           });
 
           // Strict branch association in Firebase
           val.forEach(p => {
-            if (p.id !== 'admin' && p.role !== 'admin') {
+            if (p.id !== 'admin' && p.id !== 'chairman' && p.role !== 'admin') {
               if (!p.branchId || p.branchId === 'all') {
                 p.branchId = 'baddawi';
                 needsUpdate = true;
@@ -4465,13 +4481,13 @@
 
       if (currentUserRole === 'branch_manager') {
         // Each Branch Manager ONLY sees supervisors belonging strictly to his own branch:
-        list = list.filter(s => s.branchId === currentBranchId && s.id !== currentUserId && s.id !== 'admin' && s.role !== 'admin');
+        list = list.filter(s => s.branchId === currentBranchId && s.id !== currentUserId && s.id !== 'admin' && s.id !== 'chairman' && s.role !== 'admin');
         if (titleEl) {
           titleEl.innerHTML = `🟢 مشرفو ${escapeHtml(bName)} النشطون لحظياً (الرصد المباشر):`;
         }
       } else {
-        // General Manager sees all supervisors across all branches
-        list = list.filter(s => s.id !== 'admin');
+        // Executives (Chairman / General Manager) see all subordinate supervisors and managers
+        list = list.filter(s => s.id !== currentUserId);
         if (titleEl) {
           titleEl.innerHTML = '🟢 المشرفون النشطون لحظياً لكافة الفروع (الرصد المباشر):';
         }
@@ -4540,9 +4556,8 @@
               <strong style="font-size: 12px; color: #065f46;">${escapeHtml(s.name)}</strong>
               ${currentUserRole === 'admin' ? `<span style="font-size: 10.5px; color: #047857; background: #d1fae5; padding: 1px 6px; border-radius: 4px;">📍 ${escapeHtml(item.branchName)}</span>` : ''}
               ${item.platStr ? `<span style="font-size: 10.5px; color: #047857;">• ${escapeHtml(item.platStr)}</span>` : ''}
-              <span style="font-size: 10.5px; font-weight: 800; color: #059669;">[متصل لحظياً]</span>
-              ${((currentUserRole === 'admin' && s.id !== currentUserId && s.id !== 'admin' && s.role !== 'admin') ||
-                 (currentUserRole === 'branch_manager' && s.branchId === currentBranchId && s.id !== currentUserId && s.role !== 'admin' && s.id !== 'admin' && s.role !== 'branch_manager')) ? `
+              ${((currentUserRole === 'admin' && s.id !== currentUserId) ||
+                 (currentUserRole === 'branch_manager' && s.branchId === currentBranchId && s.id !== currentUserId && s.role === 'supervisor')) ? `
                 <button type="button" onclick="event.stopPropagation(); initiateVoiceCall('${escapeHtml(s.id)}')" style="background: #10b981; color: white; border: none; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; box-shadow: 0 1px 3px rgba(16,185,129,0.3); transition: all 0.2s;" title="اتصال هاتفي صوتي مباشر عبر التطبيق">
                   <span style="font-size: 11.5px;">📞</span> اتصال
                 </button>
@@ -4925,7 +4940,8 @@
     function notifyServiceWorkerIncomingCall(callData) {
       if (!callData) return;
       const thisCallId = callData.callId || callData.id;
-      const roleText = callData.callerRole === 'admin' ? '👑 المدير العام' : (callData.callerRole === 'branch_manager' ? '🏢 مدير الفرع' : 'مشرف');
+      const isCallChairman = callData.callerId === 'chairman' || (callData.callerName && callData.callerName.includes('رئيس مجلس الإدارة'));
+      const roleText = isCallChairman ? '🏛️ رئيس مجلس الإدارة' : (callData.callerRole === 'admin' ? '👑 المدير العام' : (callData.callerRole === 'branch_manager' ? '🏢 مدير الفرع' : 'مشرف'));
 
       // 1. Post to active Service Worker controller
       try {
@@ -5023,7 +5039,8 @@
 
         console.log('🚀 Dispatching High-Priority Call FCM push to supervisor device...');
         const accessToken = await getGoogleOAuth2AccessToken();
-        const roleText = callData.callerRole === 'admin' ? '👑 المدير العام' : (callData.callerRole === 'branch_manager' ? '🏢 مدير الفرع' : 'مشرف');
+        const isCallChairman = callData.callerId === 'chairman' || (callData.callerName && callData.callerName.includes('رئيس مجلس الإدارة'));
+        const roleText = isCallChairman ? '🏛️ رئيس مجلس الإدارة' : (callData.callerRole === 'admin' ? '👑 المدير العام' : (callData.callerRole === 'branch_manager' ? '🏢 مدير الفرع' : 'مشرف'));
         const notifTitle = '📞 مكالمة صوتية واردة الآن!';
         const notifBody = `اتصال إداري مباشر من: ${callData.callerName || 'الإدارة'} (${roleText})`;
 
@@ -5185,8 +5202,20 @@
 
       // If branch_manager, only show floor supervisors belonging to this branch (hide admin accounts)
       if (currentUserRole === 'branch_manager') {
-        list = list.filter(s => s.branchId === currentBranchId && s.id !== 'admin' && s.role !== 'admin');
+        list = list.filter(s => s.branchId === currentBranchId && s.id !== 'admin' && s.id !== 'chairman' && s.role !== 'admin');
       }
+
+      // Sort: Chairman (0), General Manager (1), Branch Manager (2), Floor Supervisors (3)
+      list.sort((a, b) => {
+        const getOrder = (u) => {
+          if (u.id === 'chairman' || (u.name && u.name.includes('رئيس مجلس الإدارة'))) return 0;
+          if (u.id === 'admin' || (u.name && u.name.includes('المدير العام'))) return 1;
+          if (u.role === 'admin') return 1;
+          if (u.role === 'branch_manager' || (u.id && u.id.startsWith('mgr_'))) return 2;
+          return 3;
+        };
+        return getOrder(a) - getOrder(b);
+      });
 
       const totalCount = list.length;
       const onlineCount = list.filter(s => isUserReallyOnline(s.id)).length;
@@ -5212,12 +5241,15 @@
       `;
 
       container.innerHTML = summaryBar + list.map(s => {
-        const isAdmin = (s.role === 'admin');
+        const isChairman = (s.id === 'chairman' || (s.name && s.name.includes('رئيس مجلس الإدارة')));
+        const isAdmin = (s.role === 'admin' && !isChairman);
         const isBranchMgr = (s.role === 'branch_manager');
         const branchName = s.branchId === 'all' ? 'جميع الفروع 🌐' : (getBranchById(s.branchId) ? getBranchById(s.branchId).nameAr : s.branchId);
 
         let roleBadge = '<span style="background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">👤 مسؤول صالة</span>';
-        if (isAdmin) {
+        if (isChairman) {
+          roleBadge = '<span style="background: #fffbeb; color: #92400e; border: 1.5px solid #fcd34d; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">🏛️ رئيس مجلس الإدارة</span>';
+        } else if (isAdmin) {
           roleBadge = '<span style="background: #fdf4ff; color: #a855f7; border: 1px solid #d8b4fe; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">👑 مدير عام</span>';
         } else if (isBranchMgr) {
           roleBadge = '<span style="background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">🏢 مدير فرع</span>';
@@ -5262,9 +5294,9 @@
           `;
         }
 
-        // Branch manager cannot edit or delete general manager or other branch managers
-        const canEdit = (currentUserRole === 'admin') || (!isAdmin && !isBranchMgr);
-        const canDelete = !isAdmin && (currentUserRole === 'admin' || !isBranchMgr);
+        // Branch manager cannot edit or delete general manager, chairman, or other branch managers
+        const canEdit = (currentUserRole === 'admin') || (!isAdmin && !isChairman && !isBranchMgr);
+        const canDelete = !isAdmin && !isChairman && (currentUserRole === 'admin' || !isBranchMgr);
 
         return `
           <div style="background: white; border: 1.5px solid ${isOnline ? '#a7f3d0' : 'var(--border)'}; border-radius: 8px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow-sm); flex-wrap: wrap; gap: 8px;">
@@ -5279,8 +5311,8 @@
               </div>
             </div>
             <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-              ${((currentUserRole === 'admin' && s.id !== currentUserId && s.id !== 'admin' && s.role !== 'admin') ||
-                 (currentUserRole === 'branch_manager' && s.branchId === currentBranchId && s.id !== currentUserId && s.role !== 'admin' && s.id !== 'admin' && s.role !== 'branch_manager')) ? `
+              ${((currentUserRole === 'admin' && s.id !== currentUserId) ||
+                 (currentUserRole === 'branch_manager' && s.branchId === currentBranchId && s.id !== currentUserId && s.role === 'supervisor')) ? `
                 <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 12px; font-weight: 800; background: ${isOnline ? '#10b981' : '#059669'}; color: white; border: none; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(16,185,129,0.3);" onclick="event.stopPropagation(); closeSupervisorsModal(); initiateVoiceCall('${escapeHtml(s.id)}')">
                   📞 اتصال
                 </button>
@@ -5347,12 +5379,12 @@
       const branchInput = document.getElementById('inputSupervisorBranch');
       if (branchInput) {
         branchInput.value = sup.branchId || 'all';
-        branchInput.disabled = (sup.id === 'admin' || currentUserRole === 'branch_manager');
+        branchInput.disabled = (sup.id === 'admin' || sup.id === 'chairman' || currentUserRole === 'branch_manager');
       }
       const roleInput = document.getElementById('inputSupervisorRole');
       if (roleInput) {
         roleInput.value = sup.role || 'supervisor';
-        roleInput.disabled = (sup.id === 'admin' || currentUserRole === 'branch_manager');
+        roleInput.disabled = (sup.id === 'admin' || sup.id === 'chairman' || currentUserRole === 'branch_manager');
       }
       document.getElementById('editSupervisorId').value = sup.id;
       document.getElementById('inputSupervisorName').value = sup.name;
@@ -5407,8 +5439,8 @@
         role = 'supervisor';
       }
 
-      // General Manager (admin) account locks
-      if (id === 'admin') {
+      // Executive account locks
+      if (id === 'admin' || id === 'chairman') {
         role = 'admin';
         branchId = 'all';
       }
@@ -5455,7 +5487,7 @@
 
         const oldName = list[idx].name;
         list[idx].name = name;
-        if (id === 'admin') {
+        if (id === 'admin' || id === 'chairman') {
           list[idx].role = 'admin';
           list[idx].branchId = 'all';
         } else {
@@ -5479,12 +5511,12 @@
         }
 
         // Live display sync: If the user edited their own active account, update currentSupervisor display immediately
-        if (currentSupervisor === oldName || (typeof currentUserId !== 'undefined' && currentUserId === id) || (currentUserRole === 'admin' && id === 'admin')) {
+        if (currentSupervisor === oldName || (typeof currentUserId !== 'undefined' && currentUserId === id) || (currentUserRole === 'admin' && (id === 'admin' || id === 'chairman'))) {
           currentSupervisor = name;
           const activeDisplay = document.getElementById('activeSupervisorDisplay');
           if (activeDisplay) activeDisplay.innerText = name;
           const execUserPill = document.getElementById('adminExecutiveUserPill') || document.querySelector('.admin-user-pill');
-          if (execUserPill && (id === 'admin' || currentUserRole === 'admin')) {
+          if (execUserPill && (id === 'admin' || id === 'chairman' || currentUserRole === 'admin')) {
             execUserPill.innerText = name;
           }
         }
@@ -5508,8 +5540,8 @@
         return;
       }
 
-      if (sup.role === 'admin' || sup.id === 'admin') {
-        alert("لا يمكن حذف حساب المدير العام الرئيسي!");
+      if (sup.role === 'admin' || sup.id === 'admin' || sup.id === 'chairman') {
+        alert("لا يمكن حذف حساب الإدارة العليا أو رئيس مجلس الإدارة!");
         return;
       }
 
@@ -6811,7 +6843,8 @@ activePeerConnection.onconnectionstatechange = () => {
       });
 
       // Show Incoming Call UI
-      const roleText = callData.callerRole === 'admin' ? '👑 المدير العام' : (callData.callerRole === 'branch_manager' ? '🏢 مدير الفرع' : 'مشرف');
+      const isCallChairman = callData.callerId === 'chairman' || (callData.callerName && callData.callerName.includes('رئيس مجلس الإدارة'));
+      const roleText = isCallChairman ? '🏛️ رئيس مجلس الإدارة' : (callData.callerRole === 'admin' ? '👑 المدير العام' : (callData.callerRole === 'branch_manager' ? '🏢 مدير الفرع' : 'مشرف'));
       const b = getBranchById(callData.callerBranch);
       const bName = b ? b.nameAr : callData.callerBranch;
 
@@ -7572,9 +7605,13 @@ if (window._callAudioCtx) {
 
       const rolePill = document.getElementById('directiveSenderRolePill');
       if (rolePill) {
-        rolePill.innerText = (currentUserRole === 'admin')
-          ? `بصفتك: المدير العام (${currentSupervisor})`
-          : `بصفتك: مدير الفرع (${currentSupervisor})`;
+        let senderTitle = 'مدير الفرع';
+        if (currentUserId === 'chairman' || (currentSupervisor && currentSupervisor.includes('رئيس مجلس الإدارة'))) {
+          senderTitle = 'رئيس مجلس الإدارة';
+        } else if (currentUserRole === 'admin') {
+          senderTitle = 'المدير العام';
+        }
+        rolePill.innerText = `بصفتك: ${senderTitle} (${currentSupervisor})`;
       }
  
       currentDirectiveTargetUser = 'all';
@@ -7793,6 +7830,17 @@ if (window._callAudioCtx) {
             </optgroup>
           `;
 
+          const centralExecs = supervisors.filter(s => (s.id === 'admin' || s.id === 'chairman') && s.id !== currentUserId);
+          if (centralExecs.length > 0) {
+            html += `<optgroup label="🏛️ الإدارة العليا (توجيه مباشر):">`;
+            centralExecs.forEach(ce => {
+              const icon = getDevIcon(ce.id);
+              const execIcon = ce.id === 'chairman' ? '🏛️ ' : '👑 ';
+              html += `<option value="${escapeHtml(ce.id)}" data-branch="all">${icon}${execIcon}${escapeHtml(ce.name)}</option>`;
+            });
+            html += `</optgroup>`;
+          }
+
           const allBranchManagers = supervisors.filter(s => s.role === 'branch_manager' || (s.id && s.id.startsWith('mgr_')));
           if (allBranchManagers.length > 0) {
             html += `<optgroup label="🏢 مدراء الفروع (توجيه خاص):">`;
@@ -7807,7 +7855,7 @@ if (window._callAudioCtx) {
 
           const branches = getBranchesList();
           branches.forEach(b => {
-            const branchSups = supervisors.filter(s => s.branchId === b.id && s.role === 'supervisor' && s.id !== 'admin');
+            const branchSups = supervisors.filter(s => s.branchId === b.id && s.role === 'supervisor' && s.id !== 'admin' && s.id !== 'chairman');
             if (branchSups.length > 0) {
               html += `<optgroup label="📍 فرع ${escapeHtml(b.nameAr)} - مسؤولو الصالة (شخصي):">`;
               branchSups.forEach(s => {
@@ -7821,7 +7869,7 @@ if (window._callAudioCtx) {
           // Admin targeting a specific branch
           const bObj = getBranchById(targetBranch);
           const branchName = bObj ? bObj.nameAr : targetBranch;
-          const branchUsers = supervisors.filter(s => s.branchId === targetBranch && s.id !== 'admin' && s.role !== 'admin');
+          const branchUsers = supervisors.filter(s => s.branchId === targetBranch && s.id !== 'admin' && s.id !== 'chairman' && s.role !== 'admin');
           const branchMgrs = branchUsers.filter(s => s.role === 'branch_manager' || (s.id && s.id.startsWith('mgr_')));
           const branchSups = branchUsers.filter(s => s.role === 'supervisor');
 
