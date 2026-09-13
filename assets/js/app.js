@@ -4642,7 +4642,9 @@
       }
       const dModal = document.getElementById('adminDirectiveModal');
       if (dModal && dModal.classList.contains('open')) {
-        populateDirectiveSupervisorSelect();
+        const supSel = document.getElementById('directiveSupervisorSelect');
+        const curSelectedVal = supSel ? supSel.value : null;
+        populateDirectiveSupervisorSelect(curSelectedVal);
       }
     }
 
@@ -7664,8 +7666,22 @@ if (window._callAudioCtx) {
 
     function onDirectiveBranchChange() {
       const supSel = document.getElementById('directiveSupervisorSelect');
-      const prevSup = supSel ? supSel.value : null;
-      populateDirectiveSupervisorSelect(prevSup);
+      const branchSel = document.getElementById('directiveBranchSelect');
+      const curSup = supSel ? supSel.value : 'all';
+      const targetBranch = branchSel ? branchSel.value : 'all';
+
+      // Check if current selection belongs to newly chosen branch
+      let preserve = 'all';
+      if (curSup && curSup !== 'all' && curSup !== 'all_managers' && curSup !== 'all_supervisors') {
+        const supObj = getSupervisorsList().find(s => s.id === curSup);
+        if (supObj && (targetBranch === 'all' || supObj.branchId === targetBranch)) {
+          preserve = curSup;
+        }
+      } else if (curSup === 'all_managers' || curSup === 'all_supervisors') {
+        preserve = curSup;
+      }
+
+      populateDirectiveSupervisorSelect(preserve);
       updateDirectiveRecipientHint();
     }
 
@@ -7748,6 +7764,18 @@ if (window._callAudioCtx) {
       const supSel = document.getElementById('directiveSupervisorSelect');
       const branchSel = document.getElementById('directiveBranchSelect');
       if (!supSel) return;
+
+      // Never disrupt user interaction while dropdown is active/focused
+      if (document.activeElement === supSel) {
+        return;
+      }
+
+      // Automatically capture the user's active choice if not explicitly specified
+      const currentActiveVal = supSel.value;
+      const targetToPreserve = (typeof selectedUserIdToPreserve !== 'undefined' && selectedUserIdToPreserve !== null)
+        ? selectedUserIdToPreserve
+        : (currentActiveVal || 'all');
+
       const targetBranch = branchSel ? branchSel.value : 'all';
       const supervisors = getSupervisorsList();
 
@@ -7772,7 +7800,7 @@ if (window._callAudioCtx) {
           // Central: broadcast options, then branch managers, then supervisors grouped by branch
           html += `
             <optgroup label="🌐 خيارات البث العام:">
-              <option value="all" selected>🌐 كافة المشرفين والمسؤولين والمدراء في كل الفروع (تعميم مركزي)</option>
+              <option value="all">🌐 كافة المشرفين والمسؤولين والمدراء في كل الفروع (تعميم مركزي)</option>
               <option value="all_managers">👔 كافة مديري الفروع فقط (في جميع الفروع)</option>
               <option value="all_supervisors">👥 كافة مسؤولي الصالة فقط (في جميع الفروع)</option>
             </optgroup>
@@ -7812,7 +7840,7 @@ if (window._callAudioCtx) {
 
           html += `
             <optgroup label="📢 خيارات عامة لفرع ${escapeHtml(branchName)}:">
-              <option value="all" selected>👥 كافة موظفي ${escapeHtml(branchName)} (المدير ومسؤولو الصالة)</option>
+              <option value="all">👥 كافة موظفي ${escapeHtml(branchName)} (المدير ومسؤولو الصالة)</option>
               <option value="all_supervisors">👤 كافة مسؤولي صالة ${escapeHtml(branchName)} فقط</option>
             </optgroup>
           `;
@@ -7841,7 +7869,7 @@ if (window._callAudioCtx) {
         const branchSups = supervisors.filter(s => s.branchId === currentBranchId && s.role === 'supervisor');
         html += `
           <optgroup label="📢 جماعي:">
-            <option value="all" selected>👥 كافة مسؤولي الصالة في فرعك</option>
+            <option value="all">👥 كافة مسؤولي الصالة في فرعك</option>
           </optgroup>
         `;
         if (branchSups.length > 0) {
@@ -7856,11 +7884,12 @@ if (window._callAudioCtx) {
 
       supSel.innerHTML = html;
 
-      if (selectedUserIdToPreserve) {
-        const exists = Array.from(supSel.options).some(o => o.value === selectedUserIdToPreserve);
-        if (exists) {
-          supSel.value = selectedUserIdToPreserve;
-        }
+      // Strictly restore and lock the target selection!
+      const exists = Array.from(supSel.options).some(o => o.value === targetToPreserve);
+      if (exists) {
+        supSel.value = targetToPreserve;
+      } else {
+        supSel.value = 'all';
       }
 
       updateDirectiveRecipientHint();
