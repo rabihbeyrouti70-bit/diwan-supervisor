@@ -1,5 +1,5 @@
-// Diwan Market Floor Supervisor - Unified Service Worker (PWA + FCM Web Push + Background Calling v11)
-const CACHE_NAME = 'diwan-supervisor-v11';
+// Diwan Market Floor Supervisor - Unified Service Worker (PWA + FCM Web Push + Background Calling v12)
+const CACHE_NAME = 'diwan-supervisor-v12';
 
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
@@ -21,7 +21,18 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('[sw.js] Purging legacy cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
 // Deduplication map: prevents duplicate notifications within 15 seconds

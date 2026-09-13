@@ -4374,6 +4374,7 @@
           role: currentUserRole,
           branchId: currentBranchId,
           platform: getDevicePlatformString(),
+          appVersion: 'v12',
           lastSeen: firebase.database.ServerValue.TIMESTAMP
         }).catch(() => {});
       } catch (err) {
@@ -4639,12 +4640,6 @@
       const sModal = document.getElementById('supervisorsModal');
       if (sModal && sModal.classList.contains('open')) {
         renderSupervisorsList();
-      }
-      const dModal = document.getElementById('adminDirectiveModal');
-      if (dModal && dModal.classList.contains('open')) {
-        const supSel = document.getElementById('directiveSupervisorSelect');
-        const curSelectedVal = supSel ? supSel.value : null;
-        populateDirectiveSupervisorSelect(curSelectedVal);
       }
     }
 
@@ -7581,9 +7576,10 @@ if (window._callAudioCtx) {
           ? `بصفتك: المدير العام (${currentSupervisor})`
           : `بصفتك: مدير الفرع (${currentSupervisor})`;
       }
-
+ 
+      currentDirectiveTargetUser = 'all';
       populateDirectiveBranchSelect();
-      populateDirectiveSupervisorSelect();
+      populateDirectiveSupervisorSelect('all');
       cancelDirectiveAudioRecording();
 
       const textInp = document.getElementById('directiveInputText');
@@ -7664,43 +7660,33 @@ if (window._callAudioCtx) {
       }
     }
 
+    let currentDirectiveTargetUser = 'all';
+
     function onDirectiveBranchChange() {
       const supSel = document.getElementById('directiveSupervisorSelect');
       const branchSel = document.getElementById('directiveBranchSelect');
-      const curSup = supSel ? supSel.value : 'all';
       const targetBranch = branchSel ? branchSel.value : 'all';
 
       // Check if current selection belongs to newly chosen branch
       let preserve = 'all';
-      if (curSup && curSup !== 'all' && curSup !== 'all_managers' && curSup !== 'all_supervisors') {
-        const supObj = getSupervisorsList().find(s => s.id === curSup);
+      if (currentDirectiveTargetUser && currentDirectiveTargetUser !== 'all' && currentDirectiveTargetUser !== 'all_managers' && currentDirectiveTargetUser !== 'all_supervisors') {
+        const supObj = getSupervisorsList().find(s => s.id === currentDirectiveTargetUser);
         if (supObj && (targetBranch === 'all' || supObj.branchId === targetBranch)) {
-          preserve = curSup;
+          preserve = currentDirectiveTargetUser;
         }
-      } else if (curSup === 'all_managers' || curSup === 'all_supervisors') {
-        preserve = curSup;
+      } else if (currentDirectiveTargetUser === 'all_managers' || currentDirectiveTargetUser === 'all_supervisors') {
+        preserve = currentDirectiveTargetUser;
       }
 
-      populateDirectiveSupervisorSelect(preserve);
+      currentDirectiveTargetUser = preserve;
+      populateDirectiveSupervisorSelect(currentDirectiveTargetUser);
       updateDirectiveRecipientHint();
     }
 
     function onDirectiveSupervisorChange() {
       const supSel = document.getElementById('directiveSupervisorSelect');
-      const branchSel = document.getElementById('directiveBranchSelect');
       if (!supSel) return;
-
-      const selectedVal = supSel.value;
-      if (selectedVal && selectedVal !== 'all' && selectedVal !== 'all_managers' && selectedVal !== 'all_supervisors') {
-        // A specific supervisor or manager was selected! Auto-sync branch selector to recipient's branch
-        const targetSupObj = getSupervisorsList().find(s => s.id === selectedVal);
-        if (targetSupObj && targetSupObj.branchId && targetSupObj.branchId !== 'all') {
-          if (branchSel && branchSel.value !== targetSupObj.branchId) {
-            branchSel.value = targetSupObj.branchId;
-          }
-        }
-      }
-
+      currentDirectiveTargetUser = supSel.value || 'all';
       updateDirectiveRecipientHint();
     }
 
@@ -7774,7 +7760,8 @@ if (window._callAudioCtx) {
       const currentActiveVal = supSel.value;
       const targetToPreserve = (typeof selectedUserIdToPreserve !== 'undefined' && selectedUserIdToPreserve !== null)
         ? selectedUserIdToPreserve
-        : (currentActiveVal || 'all');
+        : (currentDirectiveTargetUser || currentActiveVal || 'all');
+      currentDirectiveTargetUser = targetToPreserve;
 
       const targetBranch = branchSel ? branchSel.value : 'all';
       const supervisors = getSupervisorsList();
@@ -7890,6 +7877,7 @@ if (window._callAudioCtx) {
         supSel.value = targetToPreserve;
       } else {
         supSel.value = 'all';
+        currentDirectiveTargetUser = 'all';
       }
 
       updateDirectiveRecipientHint();
@@ -7905,7 +7893,7 @@ if (window._callAudioCtx) {
       const sendBtn = document.getElementById('btnSendDirective');
 
       let targetBranch = branchSel ? branchSel.value : 'all';
-      const targetUser = supSel ? supSel.value : 'all';
+      const targetUser = (supSel && supSel.value) ? supSel.value : (currentDirectiveTargetUser || 'all');
       const priority = prioSel ? prioSel.value : 'urgent';
       const text = textInp ? textInp.value.trim() : '';
 
