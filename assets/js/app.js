@@ -1102,9 +1102,9 @@
 
 
     // Current State (V4.0 Multi-Shift Operations Matrix)
-    let currentSupervisor = "علي عبد العال";
-    let currentUserId = "admin";
-    let currentUserRole = "admin";
+    let currentSupervisor = "مسؤول الصالة";
+    let currentUserId = "sup_sameh";
+    let currentUserRole = "supervisor";
 
     // Restore saved device identity on startup (ensures incoming calls always reach this supervisor's phone)
     try {
@@ -1120,6 +1120,73 @@
         console.log('📱 [Device Identity] Restored active supervisor session:', currentUserId, currentSupervisor);
       }
     } catch (e) {}
+
+    /* ============================================================
+       STRICT ROLE-BASED ACCESS CONTROL (RBAC) UI CONTROLLER
+       Ensures General Manager and Branch Manager buttons are 100%
+       hidden from floor supervisors across all devices & screen sizes.
+       ============================================================ */
+    function setElementRoleVisibility(el, isVisible, displayType = 'inline-flex') {
+      if (!el) return;
+      if (isVisible) {
+        el.classList.remove('role-hidden');
+        el.removeAttribute('data-role-hidden');
+        el.style.removeProperty('display');
+        el.style.setProperty('display', displayType);
+      } else {
+        el.classList.add('role-hidden');
+        el.setAttribute('data-role-hidden', 'true');
+        el.style.setProperty('display', 'none', 'important');
+      }
+    }
+
+    function updateRoleBasedVisibility(role) {
+      const isAuth = document.body.classList.contains('auth-passed');
+      const activeRole = isAuth ? (role || currentUserRole) : 'locked';
+
+      const btnHq = document.getElementById('btnHqOverview');
+      const btnBranches = document.getElementById('btnManageBranches');
+      const adminSwitcher = document.getElementById('adminBranchSwitcher');
+      const execPanel = document.getElementById('adminExecutivePanel');
+
+      const btnManage = document.getElementById('btnManageSupervisors');
+      const btnShifts = document.getElementById('btnManageShifts');
+      const btnDirHead = document.getElementById('btnHeaderDirectives');
+      const bmPanel = document.getElementById('branchManagerPanel');
+      const presStrip = document.getElementById('managerLivePresenceStrip');
+
+      const isGeneralManager = (activeRole === 'admin');
+      const isBranchManager = (activeRole === 'branch_manager');
+      const isAnyManager = (isGeneralManager || isBranchManager);
+
+      // 1. General Manager ONLY (admin)
+      setElementRoleVisibility(btnHq, isGeneralManager, 'inline-flex');
+      setElementRoleVisibility(btnBranches, isGeneralManager, 'inline-flex');
+      setElementRoleVisibility(adminSwitcher, isGeneralManager, 'flex');
+      setElementRoleVisibility(execPanel, isGeneralManager, 'block');
+      if (isGeneralManager) {
+        if (typeof populateHeaderBranchSelect === 'function') populateHeaderBranchSelect();
+        if (typeof populateExecutiveBranchSelect === 'function') populateExecutiveBranchSelect();
+      }
+
+      // 2. Branch Manager ONLY (branch_manager)
+      setElementRoleVisibility(bmPanel, isBranchManager, 'block');
+      if (isBranchManager) {
+        const bmPill = document.getElementById('bmBranchNamePill');
+        const b = (typeof getBranchById === 'function') ? getBranchById(currentBranchId) : null;
+        if (bmPill) bmPill.innerText = b ? b.nameAr : '';
+      }
+
+      // 3. Shared between General Manager AND Branch Manager (admin + branch_manager)
+      setElementRoleVisibility(btnManage, isAnyManager, 'inline-flex');
+      setElementRoleVisibility(btnShifts, isAnyManager, 'inline-flex');
+      setElementRoleVisibility(btnDirHead, isAnyManager, 'inline-flex');
+
+      // 4. Live Presence Strip
+      if (!isAnyManager && presStrip) {
+        setElementRoleVisibility(presStrip, false);
+      }
+    }
     let currentShiftType = "morning"; // Active operating shift for logging
     let activeShiftView = "all";       // View mode: 'all' (matrix comparison) or 'morning' | 'evening' | 'night'
     let currentDate = new Date().toISOString().split("T")[0];
@@ -1897,59 +1964,8 @@
             supSelect.value = matchedUser.id;
           }
 
-          // Update header admin controls
-          const btnManage = document.getElementById('btnManageSupervisors');
-          const btnShifts = document.getElementById('btnManageShifts');
-          const btnBranches = document.getElementById('btnManageBranches');
-          const btnHq = document.getElementById('btnHqOverview');
-          const btnDirHead = document.getElementById('btnHeaderDirectives');
-          const adminSwitcher = document.getElementById('adminBranchSwitcher');
-
-          const execPanel = document.getElementById('adminExecutivePanel');
-          const bmPanel = document.getElementById('branchManagerPanel');
-
-          if (currentUserRole === 'admin') {
-            // General Manager: Full Access Everywhere
-            if (btnManage) btnManage.style.display = 'inline-flex';
-            if (btnShifts) btnShifts.style.display = 'inline-flex';
-            if (btnBranches) btnBranches.style.display = 'inline-flex';
-            if (btnHq) btnHq.style.display = 'inline-flex';
-            if (btnDirHead) btnDirHead.style.display = 'inline-flex';
-                        if (adminSwitcher) {
-              adminSwitcher.style.display = 'flex';
-              populateHeaderBranchSelect();
-            }
-            if (execPanel) {
-              execPanel.style.display = 'block';
-              populateExecutiveBranchSelect();
-            }
-            if (bmPanel) bmPanel.style.display = 'none';
-          } else if (currentUserRole === 'branch_manager') {
-            // Branch Manager: Access to shifts & supervisors of their branch
-            if (btnManage) btnManage.style.display = 'inline-flex';
-            if (btnShifts) btnShifts.style.display = 'inline-flex';
-            if (btnBranches) btnBranches.style.display = 'none';
-            if (btnHq) btnHq.style.display = 'none';
-            if (btnDirHead) btnDirHead.style.display = 'inline-flex';
-                        if (adminSwitcher) adminSwitcher.style.display = 'none';
-            if (execPanel) execPanel.style.display = 'none';
-            if (bmPanel) {
-              bmPanel.style.display = 'block';
-              const bmPill = document.getElementById('bmBranchNamePill');
-              const b = getBranchById(currentBranchId);
-              if (bmPill) bmPill.innerText = b ? b.nameAr : '';
-            }
-          } else {
-            // Floor Supervisor: Operational only
-            if (btnManage) btnManage.style.display = 'none';
-            if (btnShifts) btnShifts.style.display = 'none';
-            if (btnBranches) btnBranches.style.display = 'none';
-            if (btnHq) btnHq.style.display = 'none';
-            if (btnDirHead) btnDirHead.style.display = 'none';
-                        if (adminSwitcher) adminSwitcher.style.display = 'none';
-            if (execPanel) execPanel.style.display = 'none';
-            if (bmPanel) bmPanel.style.display = 'none';
-          }
+          // Update role-based controls strictly
+          updateRoleBasedVisibility(currentUserRole);
 
           listenToBranchDirectives();
 
@@ -1978,6 +1994,7 @@
           document.getElementById('authOverlay').classList.add('unlocked');
           document.getElementById('authPinInput').value = '';
           errorBox.innerText = '';
+          updateRoleBasedVisibility(currentUserRole);
           
           // Date input permission management
           const dateInput = document.getElementById('shiftDateInput');
@@ -2082,6 +2099,8 @@
       document.body.classList.remove('auth-passed');
       const overlay = document.getElementById('authOverlay');
       if (overlay) overlay.classList.remove('unlocked');
+      currentUserRole = 'supervisor';
+      updateRoleBasedVisibility('locked');
       
       populateAuthBranchSelect();
       populateAuthSupervisorSelect();
@@ -2131,28 +2150,9 @@
       document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('open'));
       document.body.classList.remove('modal-open');
 
-      // Hide admin controls
-      const btnManage = document.getElementById('btnManageSupervisors');
-      const btnShifts = document.getElementById('btnManageShifts');
-      const btnBranches = document.getElementById('btnManageBranches');
-      const btnHq = document.getElementById('btnHqOverview');
-      const btnDirHead = document.getElementById('btnHeaderDirectives');
-      const adminSwitcher = document.getElementById('adminBranchSwitcher');
-      if (btnManage) btnManage.style.display = 'none';
-      if (btnShifts) btnShifts.style.display = 'none';
-      if (btnBranches) btnBranches.style.display = 'none';
-      if (btnHq) btnHq.style.display = 'none';
-      if (btnDirHead) btnDirHead.style.display = 'none';
-            if (adminSwitcher) adminSwitcher.style.display = 'none';
-      const execPanel = document.getElementById('adminExecutivePanel');
-      const bmPanel = document.getElementById('branchManagerPanel');
-      if (execPanel) execPanel.style.display = 'none';
-      if (bmPanel) bmPanel.style.display = 'none';
-
+      // Hide admin controls strictly
       currentUserRole = 'supervisor';
-
-      const presStrip = document.getElementById('managerLivePresenceStrip');
-      if (presStrip) presStrip.style.display = 'none';
+      updateRoleBasedVisibility('locked');
       if (typeof stopBackgroundKeepAlive === 'function') {
         stopBackgroundKeepAlive();
       }
@@ -4435,13 +4435,13 @@
 
       // Only show to General Manager and Branch Manager (never to floor supervisors)
       if (!document.body.classList.contains('auth-passed') || (currentUserRole !== 'admin' && currentUserRole !== 'branch_manager')) {
-        strip.style.display = 'none';
+        setElementRoleVisibility(strip, false);
         return;
       }
-      strip.style.display = 'block';
+      setElementRoleVisibility(strip, true, 'block');
 
       if (btnManage) {
-        btnManage.style.display = 'inline-flex';
+        setElementRoleVisibility(btnManage, true, 'inline-flex');
       }
 
       let list = getSupervisorsList();

@@ -2169,7 +2169,7 @@
       .btn-mobile-text {
         display: inline !important;
       }
-      .header-actions .btn {
+      .header-actions .btn:not(.role-hidden):not([data-role-hidden="true"]):not([style*="display: none"]):not([style*="display:none"]) {
         flex-shrink: 0 !important;
         white-space: nowrap !important;
         font-size: 11px !important;
@@ -2177,7 +2177,7 @@
         padding: 5px 11px !important;
         border-radius: 999px !important;
         min-height: 36px !important;
-        display: inline-flex !important;
+        display: inline-flex;
         align-items: center !important;
         gap: 4px !important;
         touch-action: manipulation !important;
@@ -2831,3 +2831,17 @@
   .close-btn { background: #334155; color: white; }
   .list-group-item { background: #1e293b; border-color: var(--border); color: var(--text); }
 }
+
+/* ============================================================
+   STRICT ROLE-BASED ACCESS CONTROL (RBAC) DISPLAY OVERRIDE
+   Prevents manager/admin buttons & panels from leaking to floor supervisors
+   ============================================================ */
+.role-hidden,
+[data-role-hidden="true"],
+[style*="display: none"],
+[style*="display:none"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+

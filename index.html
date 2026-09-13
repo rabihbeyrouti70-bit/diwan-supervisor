@@ -82,7 +82,7 @@
     }
   </script>
 
-  <link rel="stylesheet" href="assets/css/styles.css?v=1789213148">
+  <link rel="stylesheet" href="assets/css/styles.css?v=1789215900">
 </head>
 <body>
 
@@ -190,26 +190,26 @@
           </div>
 
           <!-- ADMIN QUICK BRANCH SWITCHER -->
-          <div id="adminBranchSwitcher" style="display: none; align-items: center; gap: 6px; background: rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 8px;">
+          <div id="adminBranchSwitcher" class="role-hidden" data-role-hidden="true" style="display: none; align-items: center; gap: 6px; background: rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 8px;">
             <span style="font-size: 12px; color: white; font-weight: 700;">🏢 الفرع:</span>
             <select id="headerBranchSelect" class="form-control" style="font-size: 12px; padding: 4px 8px; height: auto; width: auto; font-weight: 800; background: white; color: var(--secondary);" onchange="onAdminSwitchBranch(this.value)">
               <!-- Populated dynamically -->
             </select>
           </div>
 
-          <button id="btnHqOverview" class="btn btn-outline-white btn-sm" onclick="openHqOverviewModal()" style="display: none;" title="لوحة المتابعة المركزية لكافة الفروع">
+          <button id="btnHqOverview" class="btn btn-outline-white btn-sm role-hidden" data-role-hidden="true" onclick="openHqOverviewModal()" style="display: none;" title="لوحة المتابعة المركزية لكافة الفروع">
             🏢 <span class="btn-full-text">ملخص الفروع</span><span class="btn-mobile-text" style="display: none;">الملخص</span>
           </button>
 
-          <button id="btnManageSupervisors" class="btn btn-primary btn-sm" onclick="openSupervisorsModal()" style="display: none; background: #2563eb; border-color: #1d4ed8;" title="إدارة مسؤولي الصالة (صلاحية الإدارة فقط)">
+          <button id="btnManageSupervisors" class="btn btn-primary btn-sm role-hidden" data-role-hidden="true" onclick="openSupervisorsModal()" style="display: none; background: #2563eb; border-color: #1d4ed8;" title="إدارة مسؤولي الصالة (صلاحية الإدارة فقط)">
             👥 <span class="btn-full-text">إدارة المشرفين</span><span class="btn-mobile-text" style="display: none;">المشرفين</span>
           </button>
 
-          <button id="btnManageShifts" class="btn btn-primary btn-sm" onclick="openShiftsModal()" style="display: none; background: #0284c7; border-color: #0369a1;" title="إدارة وتخصيص ورديات الفروع (صلاحية الإدارة)">
+          <button id="btnManageShifts" class="btn btn-primary btn-sm role-hidden" data-role-hidden="true" onclick="openShiftsModal()" style="display: none; background: #0284c7; border-color: #0369a1;" title="إدارة وتخصيص ورديات الفروع (صلاحية الإدارة)">
             🕒 <span class="btn-full-text">إدارة الورديات</span><span class="btn-mobile-text" style="display: none;">الورديات</span>
           </button>
 
-          <button id="btnManageBranches" class="btn btn-primary btn-sm" onclick="openBranchesModal()" style="display: none; background: #059669; border-color: #047857;" title="إدارة وإضافة فروع ديوان ماركت (صلاحية الإدارة)">
+          <button id="btnManageBranches" class="btn btn-primary btn-sm role-hidden" data-role-hidden="true" onclick="openBranchesModal()" style="display: none; background: #059669; border-color: #047857;" title="إدارة وإضافة فروع ديوان ماركت (صلاحية الإدارة)">
             📍 <span class="btn-full-text">إدارة الفروع</span><span class="btn-mobile-text" style="display: none;">الفروع</span>
           </button>
 
@@ -217,7 +217,7 @@
             🖨️ <span class="btn-full-text">طباعة</span>
           </button>
 
-          <button id="btnHeaderDirectives" class="btn btn-outline-white btn-sm" onclick="openAdminDirectiveModal()" style="display: none; color: #d97706; border-color: #f59e0b;" title="التوجيهات والملاحظات الإدارية">📢 التوجيهات</button>
+          <button id="btnHeaderDirectives" class="btn btn-outline-white btn-sm role-hidden" data-role-hidden="true" onclick="openAdminDirectiveModal()" style="display: none; color: #d97706; border-color: #f59e0b;" title="التوجيهات والملاحظات الإدارية">📢 التوجيهات</button>
           <button class="btn btn-outline-white btn-sm" onclick="lockApp()" title="قفل الجلسة (خروج)">🔒 قفل</button>
         </div>
       </div>
@@ -245,7 +245,7 @@
     
 
     <!-- GENERAL MANAGER CENTRAL CONTROL PANEL -->
-    <div id="adminExecutivePanel" class="admin-executive-card no-print" style="display: none;">
+    <div id="adminExecutivePanel" class="admin-executive-card no-print role-hidden" data-role-hidden="true" style="display: none;">
       <div class="admin-panel-header">
         <div class="admin-panel-badge">
           <span>👑</span>
@@ -304,7 +304,7 @@
     </div>
 
     <!-- BRANCH MANAGER CONTROL PANEL -->
-    <div id="branchManagerPanel" class="branch-manager-card no-print" style="display: none;">
+    <div id="branchManagerPanel" class="branch-manager-card no-print role-hidden" data-role-hidden="true" style="display: none;">
       <div class="admin-panel-header">
         <div class="admin-panel-badge">
           <span>🏢</span>
@@ -342,7 +342,7 @@
     </div>
 
     <!-- REALTIME ACTIVE SUPERVISORS STRIP (المشرفون النشطون لحظياً) -->
-    <div id="managerLivePresenceStrip" class="no-print" style="display: none; background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+    <div id="managerLivePresenceStrip" class="no-print role-hidden" data-role-hidden="true" style="display: none; background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span class="pulse-dot" style="width: 10px; height: 10px; background: #10b981; border-radius: 50%; box-shadow: 0 0 0 3px rgba(16,185,129,0.25);"></span>
@@ -1370,6 +1370,6 @@
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789214704"></script>
+  <script src="assets/js/app.js?v=1789215900"></script>
 </body>
 </html>
