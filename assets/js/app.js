@@ -1102,8 +1102,8 @@
 
 
     // Current State (V4.0 Multi-Shift Operations Matrix)
-    let currentSupervisor = "مسؤول الصالة";
-    let currentUserId = "sup_sameh";
+    let currentSupervisor = "";
+    let currentUserId = "";
     let currentUserRole = "supervisor";
 
     // Restore saved device identity on startup (ensures incoming calls always reach this supervisor's phone)
@@ -1927,8 +1927,17 @@
 
         if (matchedUser) {
           failedAttempts = 0;
+          const prevSavedUid = localStorage.getItem('diwan_saved_user_id');
           currentSupervisor = matchedUser.name;
           currentUserId = matchedUser.id;
+
+          // Clear previous user's FCM token mapping from this device if different user logs in
+          if (prevSavedUid && prevSavedUid !== matchedUser.id && firebaseDb) {
+            try {
+              if (currentBranchId) firebaseDb.ref('branches/' + currentBranchId + '/fcm_tokens/' + prevSavedUid).remove().catch(() => {});
+              firebaseDb.ref('fcm_devices/' + prevSavedUid).remove().catch(() => {});
+            } catch (e) {}
+          }
 
           // Persist device identity so incoming calls reach this phone even after refresh/backgrounding
           try {
@@ -2172,6 +2181,11 @@
 
       document.body.classList.remove('auth-passed');
       document.getElementById('authOverlay').classList.remove('unlocked');
+      const dirBanner = document.getElementById('directiveAlertBanner');
+      if (dirBanner) {
+        dirBanner.style.display = 'none';
+        dirBanner.innerHTML = '';
+      }
       populateAuthBranchSelect();
       populateAuthSupervisorSelect();
       showToast("🔒 تم قفل الجلسة");
@@ -5852,6 +5866,22 @@
     // Instant Mobile Phone Notification (Background Service Worker + Native Web Notification) & Haptic Vibration
     function triggerDirectiveAlert(directive) {
       if (!directive || !directive.id) return;
+      // STRICT GUARD: Must be authenticated and not sender
+      if (!document.body.classList.contains('auth-passed') || !currentUserId) return;
+      if (directive.senderId === currentUserId || (currentUserRole === 'admin' && directive.senderRole === 'admin')) return;
+
+      // Recipient target check
+      if (directive.targetUserId && directive.targetUserId !== 'all') {
+        if (directive.targetUserId === 'all_managers') {
+          if (currentUserRole !== 'branch_manager') return;
+        } else if (directive.targetUserId === 'all_supervisors') {
+          if (currentUserRole !== 'supervisor') return;
+        } else {
+          // Specific user targeted (e.g. sup_sameh)
+          if (directive.targetUserId !== currentUserId) return;
+        }
+      }
+
       if (alertedDirectiveIds.has(directive.id)) return;
       alertedDirectiveIds.add(directive.id);
       safeSetItem('diwan_alerted_directives', JSON.stringify(Array.from(alertedDirectiveIds).slice(-50)));
@@ -7633,10 +7663,88 @@ if (window._callAudioCtx) {
     }
 
     function onDirectiveBranchChange() {
-      populateDirectiveSupervisorSelect();
+      const supSel = document.getElementById('directiveSupervisorSelect');
+      const prevSup = supSel ? supSel.value : null;
+      populateDirectiveSupervisorSelect(prevSup);
+      updateDirectiveRecipientHint();
     }
 
-    function populateDirectiveSupervisorSelect() {
+    function onDirectiveSupervisorChange() {
+      const supSel = document.getElementById('directiveSupervisorSelect');
+      const branchSel = document.getElementById('directiveBranchSelect');
+      if (!supSel) return;
+
+      const selectedVal = supSel.value;
+      if (selectedVal && selectedVal !== 'all' && selectedVal !== 'all_managers' && selectedVal !== 'all_supervisors') {
+        // A specific supervisor or manager was selected! Auto-sync branch selector to recipient's branch
+        const targetSupObj = getSupervisorsList().find(s => s.id === selectedVal);
+        if (targetSupObj && targetSupObj.branchId && targetSupObj.branchId !== 'all') {
+          if (branchSel && branchSel.value !== targetSupObj.branchId) {
+            branchSel.value = targetSupObj.branchId;
+          }
+        }
+      }
+
+      updateDirectiveRecipientHint();
+    }
+
+    function updateDirectiveRecipientHint() {
+      const supSel = document.getElementById('directiveSupervisorSelect');
+      const branchSel = document.getElementById('directiveBranchSelect');
+      const hint = document.getElementById('directiveRecipientHint');
+      if (!hint || !supSel) return;
+
+      const targetVal = supSel.value;
+      const targetBranch = branchSel ? branchSel.value : 'all';
+      const bObj = getBranchById(targetBranch);
+      const branchName = bObj ? bObj.nameAr : targetBranch;
+
+      if (targetVal === 'all') {
+        if (targetBranch === 'all') {
+          hint.style.display = 'block';
+          hint.style.background = '#f0f9ff';
+          hint.style.borderColor = '#bae6fd';
+          hint.style.color = '#0369a1';
+          hint.innerHTML = '🌐 <strong>تعميم مركزي شامل:</strong> سيصل التوجيه لجميع مسؤولي الصالة ومدراء الفروع في كافة الفروع.';
+        } else {
+          hint.style.display = 'block';
+          hint.style.background = '#f0f9ff';
+          hint.style.borderColor = '#bae6fd';
+          hint.style.color = '#0369a1';
+          hint.innerHTML = `👥 <strong>تعميم فرعي:</strong> سيصل التوجيه لكافة موظفي مسؤولي الصالة ومدير ${escapeHtml(branchName)}.`;
+        }
+      } else if (targetVal === 'all_managers') {
+        hint.style.display = 'block';
+        hint.style.background = '#eff6ff';
+        hint.style.borderColor = '#bfdbfe';
+        hint.style.color = '#1d4ed8';
+        hint.innerHTML = '👔 <strong>خاص بمدراء الفروع:</strong> سيصل التوجيه لمدراء الفروع فقط ولن يظهر لمسؤولي الصالة.';
+      } else if (targetVal === 'all_supervisors') {
+        hint.style.display = 'block';
+        hint.style.background = '#f0fdf4';
+        hint.style.borderColor = '#bbf7d0';
+        hint.style.color = '#15803d';
+        hint.innerHTML = (targetBranch === 'all')
+          ? '👤 <strong>خاص بمسؤولي الصالة:</strong> سيصل التوجيه لكافة مسؤولي الصالة في جميع الفروع.'
+          : `👤 <strong>خاص بمسؤولي الصالة:</strong> سيصل التوجيه لمسؤولي الصالة في فرع ${escapeHtml(branchName)} فقط.`;
+      } else {
+        const targetSupObj = getSupervisorsList().find(s => s.id === targetVal);
+        if (targetSupObj) {
+          const isMgr = targetSupObj.role === 'branch_manager' || (targetSupObj.id && targetSupObj.id.startsWith('mgr_'));
+          const sBranch = getBranchById(targetSupObj.branchId);
+          const sBranchName = sBranch ? sBranch.nameAr : (targetSupObj.branchId || '');
+          hint.style.display = 'block';
+          hint.style.background = '#fdf2f8';
+          hint.style.borderColor = '#fbcfe8';
+          hint.style.color = '#9d174d';
+          hint.innerHTML = `🎯 <strong>توجيه شخصي حصري:</strong> سيصل التوجيه <u>حصرياً</u> إلى ${isMgr ? 'مدير الفرع' : 'مسؤول الصالة'}: <strong>${escapeHtml(targetSupObj.name)}</strong> (${escapeHtml(sBranchName)}) ولن يتمكن أي موظف آخر من رؤيته أو استلامه.`;
+        } else {
+          hint.style.display = 'none';
+        }
+      }
+    }
+
+    function populateDirectiveSupervisorSelect(selectedUserIdToPreserve) {
       const supSel = document.getElementById('directiveSupervisorSelect');
       const branchSel = document.getElementById('directiveBranchSelect');
       if (!supSel) return;
@@ -7645,41 +7753,55 @@ if (window._callAudioCtx) {
 
       const getDevIcon = (id) => {
         const isOnline = isUserReallyOnline(id);
-        if (isOnline) return '🟢 [متصل لحظياً الآن] ';
+        if (isOnline) return '🟢 [متصل الآن] ';
         const pres = livePresenceCache[id];
         const dev = deviceActivationsCache[id];
         const lastSeen = pres ? pres.lastSeen : (dev ? (dev.lastActive || dev.updatedAt) : null);
         const statusText = formatLivePresenceTime(lastSeen, false);
-        if (statusText.includes('أغلق التطبيق للتو')) return '🔴 [أغلق التطبيق للتو] ';
-        if (dev && (dev.notificationPermission === 'granted' || !!dev.token)) return '📱 [مفعل للتنبيه] ';
+        if (statusText.includes('أغلق التطبيق للتو')) return '🔴 [أغلق للتو] ';
+        if (dev && (dev.notificationPermission === 'granted' || !!dev.token)) return '📱 [جاهز للتنبيه] ';
         if (lastSeen) return '🟡 [كان متصلاً] ';
         return '⚪ ';
       };
 
+      let html = '';
+
       if (currentUserRole === 'admin') {
         supSel.disabled = false;
         if (targetBranch === 'all') {
-          // Central broadcast across all branches
-          const allBranchManagers = supervisors.filter(s => s.role === 'branch_manager' || (s.id && s.id.startsWith('mgr_')));
-          
-          let html = `
-            <option value="all" selected>🌐 كافة المشرفين والمسؤولين والمدراء في كل الفروع</option>
-            <option value="all_managers">👔 كافة مديري الفروع فقط (في جميع الفروع)</option>
-            <option value="all_supervisors">👤 كافة مسؤولي الصالة فقط (في جميع الفروع)</option>
+          // Central: broadcast options, then branch managers, then supervisors grouped by branch
+          html += `
+            <optgroup label="🌐 خيارات البث العام:">
+              <option value="all" selected>🌐 كافة المشرفين والمسؤولين والمدراء في كل الفروع (تعميم مركزي)</option>
+              <option value="all_managers">👔 كافة مديري الفروع فقط (في جميع الفروع)</option>
+              <option value="all_supervisors">👥 كافة مسؤولي الصالة فقط (في جميع الفروع)</option>
+            </optgroup>
           `;
 
+          const allBranchManagers = supervisors.filter(s => s.role === 'branch_manager' || (s.id && s.id.startsWith('mgr_')));
           if (allBranchManagers.length > 0) {
-            html += `<optgroup label="🏢 إرسال لمدير فرع محدد:">`;
+            html += `<optgroup label="🏢 مدراء الفروع (توجيه خاص):">`;
             allBranchManagers.forEach(bm => {
               const bObj = getBranchById(bm.branchId);
               const branchLabel = bObj ? bObj.nameAr : bm.branchId;
               const icon = getDevIcon(bm.id);
-              html += `<option value="${escapeHtml(bm.id)}">${icon}🏢 ${escapeHtml(bm.name)} (${escapeHtml(branchLabel)})</option>`;
+              html += `<option value="${escapeHtml(bm.id)}" data-branch="${escapeHtml(bm.branchId || '')}">${icon}🏢 ${escapeHtml(bm.name)} (${escapeHtml(branchLabel)})</option>`;
             });
             html += `</optgroup>`;
           }
 
-          supSel.innerHTML = html;
+          const branches = getBranchesList();
+          branches.forEach(b => {
+            const branchSups = supervisors.filter(s => s.branchId === b.id && s.role === 'supervisor' && s.id !== 'admin');
+            if (branchSups.length > 0) {
+              html += `<optgroup label="📍 فرع ${escapeHtml(b.nameAr)} - مسؤولو الصالة (شخصي):">`;
+              branchSups.forEach(s => {
+                const icon = getDevIcon(s.id);
+                html += `<option value="${escapeHtml(s.id)}" data-branch="${escapeHtml(b.id)}">${icon}👤 ${escapeHtml(s.name)} (${escapeHtml(b.nameAr)})</option>`;
+              });
+              html += `</optgroup>`;
+            }
+          });
         } else {
           // Admin targeting a specific branch
           const bObj = getBranchById(targetBranch);
@@ -7688,42 +7810,60 @@ if (window._callAudioCtx) {
           const branchMgrs = branchUsers.filter(s => s.role === 'branch_manager' || (s.id && s.id.startsWith('mgr_')));
           const branchSups = branchUsers.filter(s => s.role === 'supervisor');
 
-          let html = `
-            <option value="all" selected>👥 كافة موظفي ${escapeHtml(branchName)} (المدير ومسؤولو الصالة)</option>
+          html += `
+            <optgroup label="📢 خيارات عامة لفرع ${escapeHtml(branchName)}:">
+              <option value="all" selected>👥 كافة موظفي ${escapeHtml(branchName)} (المدير ومسؤولو الصالة)</option>
+              <option value="all_supervisors">👤 كافة مسؤولي صالة ${escapeHtml(branchName)} فقط</option>
+            </optgroup>
           `;
 
           if (branchMgrs.length > 0) {
-            html += `<optgroup label="🏢 إدارة الفرع (المدراء):">`;
+            html += `<optgroup label="🏢 إدارة الفرع:">`;
             branchMgrs.forEach(bm => {
               const icon = getDevIcon(bm.id);
-              html += `<option value="${escapeHtml(bm.id)}">${icon}🏢 [مدير الفرع] ${escapeHtml(bm.name)}</option>`;
+              html += `<option value="${escapeHtml(bm.id)}" data-branch="${escapeHtml(targetBranch)}">${icon}🏢 [مدير الفرع] ${escapeHtml(bm.name)}</option>`;
             });
             html += `</optgroup>`;
           }
 
           if (branchSups.length > 0) {
-            html += `<optgroup label="👤 مسؤولو الصالة:">`;
+            html += `<optgroup label="👤 مسؤولو الصالة (توجيه خاص):">`;
             branchSups.forEach(s => {
               const icon = getDevIcon(s.id);
-              html += `<option value="${escapeHtml(s.id)}">${icon}👤 ${escapeHtml(s.name)}</option>`;
+              html += `<option value="${escapeHtml(s.id)}" data-branch="${escapeHtml(targetBranch)}">${icon}👤 ${escapeHtml(s.name)}</option>`;
             });
             html += `</optgroup>`;
           }
-
-          supSel.innerHTML = html;
         }
       } else {
         // Branch Manager sending within their own branch
         supSel.disabled = false;
         const branchSups = supervisors.filter(s => s.branchId === currentBranchId && s.role === 'supervisor');
-        supSel.innerHTML = `
-          <option value="all" selected>👥 كافة مسؤولي الصالة في فرعك</option>
-          ${branchSups.map(s => {
-            const icon = getDevIcon(s.id);
-            return `<option value="${escapeHtml(s.id)}">${icon}👤 ${escapeHtml(s.name)}</option>`;
-          }).join('')}
+        html += `
+          <optgroup label="📢 جماعي:">
+            <option value="all" selected>👥 كافة مسؤولي الصالة في فرعك</option>
+          </optgroup>
         `;
+        if (branchSups.length > 0) {
+          html += `<optgroup label="👤 مسؤولو الصالة (خاص):">`;
+          branchSups.forEach(s => {
+            const icon = getDevIcon(s.id);
+            html += `<option value="${escapeHtml(s.id)}" data-branch="${escapeHtml(currentBranchId)}">${icon}👤 ${escapeHtml(s.name)}</option>`;
+          });
+          html += `</optgroup>`;
+        }
       }
+
+      supSel.innerHTML = html;
+
+      if (selectedUserIdToPreserve) {
+        const exists = Array.from(supSel.options).some(o => o.value === selectedUserIdToPreserve);
+        if (exists) {
+          supSel.value = selectedUserIdToPreserve;
+        }
+      }
+
+      updateDirectiveRecipientHint();
     }
 
     // Send Directive Engine
@@ -7735,7 +7875,7 @@ if (window._callAudioCtx) {
       const errBox = document.getElementById('directiveFormError');
       const sendBtn = document.getElementById('btnSendDirective');
 
-      const targetBranch = branchSel ? branchSel.value : 'all';
+      let targetBranch = branchSel ? branchSel.value : 'all';
       const targetUser = supSel ? supSel.value : 'all';
       const priority = prioSel ? prioSel.value : 'urgent';
       const text = textInp ? textInp.value.trim() : '';
@@ -7743,6 +7883,15 @@ if (window._callAudioCtx) {
       if (!text && !directiveAudioBase64) {
         if (errBox) errBox.innerText = 'يرجى كتابة نص للتوجيه أو تسجيل ملاحظة صوتية واحدة على الأقل.';
         return;
+      }
+
+      // If a specific individual supervisor/manager is targeted, strictly lock to their branch
+      let targetSupObj = null;
+      if (targetUser && targetUser !== 'all' && targetUser !== 'all_managers' && targetUser !== 'all_supervisors') {
+        targetSupObj = getSupervisorsList().find(s => s.id === targetUser);
+        if (targetSupObj && targetSupObj.branchId && targetSupObj.branchId !== 'all') {
+          targetBranch = targetSupObj.branchId;
+        }
       }
 
       if (errBox) errBox.innerText = '';
@@ -7759,9 +7908,10 @@ if (window._callAudioCtx) {
         id: dirId,
         branchId: targetBranch,
         targetUserId: targetUser,
+        targetUserName: targetSupObj ? targetSupObj.name : '',
         senderRole: currentUserRole,
         senderName: currentSupervisor,
-        senderId: (typeof currentUserId !== 'undefined' ? currentUserId : 'admin'),
+        senderId: (typeof currentUserId !== 'undefined' && currentUserId ? currentUserId : 'admin'),
         priority: priority,
         text: text,
         audioBase64: directiveAudioBase64 || '',
@@ -7776,14 +7926,8 @@ if (window._callAudioCtx) {
       // Determine target branches to dispatch to
       let targetBranchIds = [];
       if (targetBranch === 'all') {
-        if (targetUser && targetUser !== 'all' && targetUser !== 'all_managers' && targetUser !== 'all_supervisors') {
-          // If a specific manager or supervisor was selected while 'all' branches was chosen, route to their branch!
-          const targetSupObj = getSupervisorsList().find(s => s.id === targetUser);
-          if (targetSupObj && targetSupObj.branchId && targetSupObj.branchId !== 'all') {
-            targetBranchIds = [targetSupObj.branchId];
-          } else {
-            targetBranchIds = getBranchesList().map(b => b.id);
-          }
+        if (targetSupObj && targetSupObj.branchId && targetSupObj.branchId !== 'all') {
+          targetBranchIds = [targetSupObj.branchId];
         } else {
           targetBranchIds = getBranchesList().map(b => b.id);
         }
@@ -7864,21 +8008,28 @@ if (window._callAudioCtx) {
           safeSetItem(key, JSON.stringify(list.slice(0, 40)));
 
           // Immediately alert any unacknowledged directive targeted to this user
-          if (bId === currentBranchId || (currentUserRole === 'admin' && currentBranchId === 'all')) {
-            list.forEach(d => {
-              if (!d.acknowledged) {
-                if (d.senderId === (typeof currentUserId !== 'undefined' ? currentUserId : '')) {
-                  return; // Don't alarm the sender themselves
+          // STRICT AUTH & RECIPIENT GUARD
+          if (document.body.classList.contains('auth-passed') && currentUserId) {
+            if (bId === currentBranchId || (currentUserRole === 'admin' && currentBranchId === 'all')) {
+              list.forEach(d => {
+                if (!d.acknowledged) {
+                  if (d.senderId === currentUserId || (currentUserRole === 'admin' && d.senderRole === 'admin')) {
+                    return; // Don't alarm the sender themselves
+                  }
+                  if (d.targetUserId === 'all_managers') {
+                    if (currentUserRole === 'branch_manager') triggerDirectiveAlert(d);
+                  } else if (d.targetUserId === 'all_supervisors') {
+                    if (currentUserRole === 'supervisor') triggerDirectiveAlert(d);
+                  } else if (!d.targetUserId || d.targetUserId === 'all') {
+                    triggerDirectiveAlert(d);
+                  } else if (d.targetUserId === currentUserId) {
+                    // Strictly match current user
+                    triggerDirectiveAlert(d);
+                  }
+                  // Any other user (e.g. Issa when target is Sameh): completely ignored!
                 }
-                if (d.targetUserId === 'all_managers') {
-                  if (currentUserRole === 'branch_manager') triggerDirectiveAlert(d);
-                } else if (d.targetUserId === 'all_supervisors') {
-                  if (currentUserRole === 'supervisor') triggerDirectiveAlert(d);
-                } else if (!d.targetUserId || d.targetUserId === 'all' || (typeof currentUserId !== 'undefined' && currentUserId === d.targetUserId)) {
-                  triggerDirectiveAlert(d);
-                }
-              }
-            });
+              });
+            }
           }
 
           // Realtime live updates without requiring manual reload or refresh!
@@ -7899,6 +8050,13 @@ if (window._callAudioCtx) {
       const bannerContainer = document.getElementById('directiveAlertBanner');
       if (!bannerContainer) return;
 
+      // STRICT AUTH GUARD: Never show personal directives on unauthenticated lock screen
+      if (!document.body.classList.contains('auth-passed') || !currentUserId) {
+        bannerContainer.style.display = 'none';
+        bannerContainer.innerHTML = '';
+        return;
+      }
+
       const key = 'diwan_directives_' + currentBranchId + '_' + currentDate;
       let directives = memoryDirectivesCache[currentBranchId] || safeJsonParse(safeGetItem(key), []);
 
@@ -7915,7 +8073,7 @@ if (window._callAudioCtx) {
       // Filter active unacknowledged directives targeting this branch / supervisor
       const active = directives.find(d => {
         if (d.acknowledged) return false;
-        if (d.senderId === (typeof currentUserId !== 'undefined' ? currentUserId : '')) {
+        if (d.senderId === currentUserId || (currentUserRole === 'admin' && d.senderRole === 'admin')) {
           return false;
         }
         if (d.targetUserId && d.targetUserId !== 'all') {
@@ -7924,7 +8082,8 @@ if (window._callAudioCtx) {
           } else if (d.targetUserId === 'all_supervisors') {
             return (currentUserRole === 'supervisor');
           } else {
-            return (typeof currentUserId !== 'undefined' && currentUserId === d.targetUserId);
+            // Strictly match currentUserId
+            return (currentUserId === d.targetUserId);
           }
         }
         return true;
@@ -7945,6 +8104,19 @@ if (window._callAudioCtx) {
         : (pClass === 'important' ? '⚠️ توجيه إداري هام' : '📢 ملاحظة إدارية');
       const senderTitle = (active.senderRole === 'admin') ? 'المدير العام' : 'مدير الفرع';
 
+      let recipientBadge = '';
+      if (!active.targetUserId || active.targetUserId === 'all') {
+        recipientBadge = '<span style="background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;">🌐 تعميم عام لكافة المشرفين</span>';
+      } else if (active.targetUserId === 'all_managers') {
+        recipientBadge = '<span style="background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;">👔 موجه لمدراء الفروع</span>';
+      } else if (active.targetUserId === 'all_supervisors') {
+        recipientBadge = '<span style="background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;">👥 موجه لمسؤولي الصالة</span>';
+      } else {
+        const tSup = getSupervisorsList().find(s => s.id === active.targetUserId);
+        const name = tSup ? tSup.name : (active.targetUserName || active.targetUserId);
+        recipientBadge = `<span style="background: #fef08a; color: #854d0e; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">👤 موجه إليك شخصياً (${escapeHtml(name)})</span>`;
+      }
+
       bannerContainer.style.display = 'block';
       bannerContainer.innerHTML = `
         <div class="directive-banner-card ${pClass}">
@@ -7952,6 +8124,7 @@ if (window._callAudioCtx) {
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
               <span class="directive-pulse-badge">${pLabel}</span>
               <span style="font-weight: 800; font-size: 13.5px;">من: ${escapeHtml(active.senderName)} (${senderTitle})</span>
+              ${recipientBadge}
               <span style="font-size: 11px; opacity: 0.85;">🕒 ${escapeHtml(active.timeFormatted || '')}</span>
             </div>
             <button type="button" class="btn-ack-directive" onclick="acknowledgeDirective('${escapeHtml(active.id)}', '${escapeHtml(active.branchId || currentBranchId)}')">
@@ -7971,15 +8144,27 @@ if (window._callAudioCtx) {
 
     // Acknowledge Directive (Read Receipt)
     function acknowledgeDirective(dirId, branchId) {
+      if (!document.body.classList.contains('auth-passed')) {
+        alert("يرجى تسجيل الدخول أولاً لتأكيد الاستلام.");
+        return;
+      }
+
       const nowStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
       // Resolve acknowledging branch: user's branch takes precedence, then branchId, then search
       let bId = (currentBranchId && currentBranchId !== 'all') ? currentBranchId : (branchId && branchId !== 'all' ? branchId : null);
 
-      if (!bId) {
+      let targetDirective = null;
+      if (bId && memoryDirectivesCache[bId]) {
+        targetDirective = memoryDirectivesCache[bId].find(d => d.id === dirId);
+      }
+
+      if (!targetDirective) {
         const branches = getBranchesList();
         for (const b of branches) {
           const list = memoryDirectivesCache[b.id] || safeJsonParse(safeGetItem('diwan_directives_' + b.id + '_' + currentDate), []);
-          if (list.some(d => d.id === dirId)) {
+          const f = list.find(d => d.id === dirId);
+          if (f) {
+            targetDirective = f;
             bId = b.id;
             break;
           }
@@ -7987,6 +8172,14 @@ if (window._callAudioCtx) {
       }
 
       if (!bId) bId = currentBranchId;
+
+      // Prevent cross-user acknowledgment if directive is personal to someone else
+      if (targetDirective && targetDirective.targetUserId && targetDirective.targetUserId !== 'all' && targetDirective.targetUserId !== 'all_managers' && targetDirective.targetUserId !== 'all_supervisors') {
+        if (currentUserRole !== 'admin' && currentUserId !== targetDirective.targetUserId) {
+          alert("عذراً، هذا التوجيه موجه لمشرف آخر.");
+          return;
+        }
+      }
 
       // 1. Update in memory cache
       if (memoryDirectivesCache[bId]) {
@@ -8083,6 +8276,14 @@ if (window._callAudioCtx) {
         list.forEach(d => {
           if (!d.branchNameAr && bObj) d.branchNameAr = bObj.nameAr;
           combinedList.push(d);
+        });
+      }
+
+      // Privacy filter: Floor supervisors only see directives addressed to them or broadcasts
+      if (currentUserRole !== 'admin' && currentUserRole !== 'branch_manager') {
+        combinedList = combinedList.filter(d => {
+          if (!d.targetUserId || d.targetUserId === 'all' || d.targetUserId === 'all_supervisors') return true;
+          return (currentUserId && d.targetUserId === currentUserId);
         });
       }
 
@@ -8265,10 +8466,18 @@ if (window._callAudioCtx) {
           // Handle foreground FCM push message
           fcmMessaging.onMessage((payload) => {
             console.log('⚡ FCM foreground message arrived:', payload);
+            const targetUser = payload.data && payload.data.targetUserId;
+            if (targetUser && targetUser !== 'all') {
+              if (!document.body.classList.contains('auth-passed') || !currentUserId) return;
+              if (targetUser === 'all_managers' && currentUserRole !== 'branch_manager') return;
+              if (targetUser === 'all_supervisors' && currentUserRole !== 'supervisor') return;
+              if (targetUser !== 'all_managers' && targetUser !== 'all_supervisors' && targetUser !== currentUserId) return;
+            }
             const title = (payload.notification && payload.notification.title) || (payload.data && payload.data.title) || '📢 توجيه إداري';
             const body = (payload.notification && payload.notification.body) || (payload.data && payload.data.body) || '';
             triggerDirectiveAlert({
               id: (payload.data && payload.data.directiveId) || ('dir_' + Date.now()),
+              targetUserId: targetUser || 'all',
               senderName: (payload.data && payload.data.senderName) || 'الإدارة',
               priority: (payload.data && payload.data.priority) || 'urgent',
               text: body
@@ -8294,12 +8503,14 @@ if (window._callAudioCtx) {
             cur.vapidKey = val.vapidKey;
             if (val.serverKey) cur.serverKey = val.serverKey;
             safeSetItem('diwan_fcm_config', JSON.stringify(cur));
-            registerFcmDeviceToken();
+            if (document.body.classList.contains('auth-passed') && currentUserId) {
+              registerFcmDeviceToken();
+            }
           }
         });
 
-        // Register device token if permission is already granted
-        if (Notification.permission === 'granted') {
+        // Register device token if permission is already granted AND user is authenticated
+        if (Notification.permission === 'granted' && document.body.classList.contains('auth-passed') && currentUserId) {
           registerFcmDeviceToken();
         }
       } catch (err) {
@@ -8310,6 +8521,10 @@ if (window._callAudioCtx) {
     async function registerFcmDeviceToken() {
       if (!fcmMessaging || !('serviceWorker' in navigator)) return;
       if (Notification.permission !== 'granted') return;
+      // Strict guard: Only register FCM token when session is authenticated
+      if (!document.body.classList.contains('auth-passed') || !currentUserId) {
+        return;
+      }
 
       const fcmConfig = getFcmConfig();
       const vapidKey = fcmConfig.vapidKey ? fcmConfig.vapidKey.trim() : '';
@@ -8506,6 +8721,7 @@ if (window._callAudioCtx) {
                 },
                 data: {
                   directiveId: String(directive.id || ''),
+                  targetUserId: String(directive.targetUserId || 'all'),
                   title: String(notifTitle),
                   body: String(bodyText),
                   priority: String(directive.priority || 'urgent'),

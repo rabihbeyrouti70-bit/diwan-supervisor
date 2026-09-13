@@ -1050,11 +1050,13 @@
           </div>
           <div class="form-group">
             <label for="directiveSupervisorSelect" style="font-size: 12px; font-weight: 700;">👤 المستلم في الفرع:</label>
-            <select id="directiveSupervisorSelect" class="form-control">
+            <select id="directiveSupervisorSelect" class="form-control" onchange="onDirectiveSupervisorChange()">
               <!-- Populated dynamically -->
             </select>
           </div>
         </div>
+
+        <div id="directiveRecipientHint" style="font-size: 11.5px; border-radius: 8px; padding: 7px 12px; margin-bottom: 12px; border: 1px solid transparent; display: none;"></div>
 
         <div class="form-group" style="margin-bottom: 12px;">
           <label for="directivePrioritySelect" style="font-size: 12px; font-weight: 700;">🚨 درجة الأهمية والتنبيه:</label>
@@ -1370,6 +1372,6 @@
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789215900"></script>
+  <script src="assets/js/app.js?v=1789216900"></script>
 </body>
 </html>
