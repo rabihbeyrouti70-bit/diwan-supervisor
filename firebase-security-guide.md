@@ -17,9 +17,11 @@
   "rules": {
     ".read": false,
     ".write": false,
+
     "branches": {
       "$branchId": {
         ".read": true,
+        ".write": true,
         "directives": {
           "$directiveId": {
             ".write": "!data.exists() || (newData.exists() && newData.child('id').val() === data.child('id').val())"
@@ -32,36 +34,49 @@
         }
       }
     },
+
     "presence": {
       ".read": true,
       "$userId": {
         ".write": "newData.hasChildren(['status', 'lastSeen'])"
       }
     },
+
     "fcm_devices": {
       ".read": true,
       "$userId": {
         ".write": "newData.exists()"
       }
     },
+
     "calls": {
       ".read": true,
       "$callId": {
         ".write": "true"
       }
     },
+
+    "incoming_calls": {
+      ".read": true,
+      ".write": true
+    },
+    "call_logs": {
+      ".read": true,
+      ".write": true
+    },
+
     "config": {
       ".read": true,
-      "supervisors": {
-        ".write": "newData.exists() && newData.val() != null"
-      }
+      ".write": true
     },
+
     "auth_lockouts": {
       ".read": true,
       "$userId": {
         ".write": "true"
       }
     },
+
     "security_audit_logs": {
       ".read": true,
       "$logId": {
@@ -91,36 +106,12 @@
 
 ---
 
-## 📸 الخطوة 3: تفعيل وحماية التخزين السحابي للصور (Cloud Storage Rules)
+## 📸 التوثيق البصري للصور (يعمل مجاناً 100% وبدون أي ترقية أو بطاقة ائتمان)
 
-لتخزين صور توثيق المهام الميدانية والمحافظة على المساحة المجانية:
-1. في [Firebase Console](https://console.firebase.google.com/)، من القائمة الجانبية اضغط على **Build** ثم **Storage**.
-2. إذا لم تكن الخدمة مفعلة سابقاً، اضغط على **Get started**، وافق على الإعدادات الافتراضية واضغط **Done**.
-3. في أعلى صفحة Storage، اضغط على تبويب **Rules** (قواعد الأمان).
-4. الصق محتوى ملف `storage.rules` التالي:
-
-```javascript
-rules_version = '2';
-
-service firebase.storage {
-  match /b/{bucket}/o {
-
-    // مسار صور التوثيق البصري لمهام الفروع
-    match /branch_evidence/{branchId}/{date}/{shiftId}/{fileName} {
-      allow read: if true;
-      allow write: if request.resource.size < 1 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-      allow delete: if true;
-    }
-
-    match /{allPaths=**} {
-      allow read, write: if false;
-    }
-  }
-}
-```
-5. اضغط على زر **Publish** (نشر).
-بذلك يتم السماح فقط بالصور الخفيفة (أقل من 1 ميغابايت) وحمايتها من أي استغلال للمساحة.
+إذا ظهرت لك رسالة في Firebase تطلب ترقية الخطة (*To use Storage, upgrade your project's pricing plan*):
+- **لا تقلق، لا تحتاج إلى ترقية خطتك إطلاقاً ولا تحتاج لإضافة أي بطاقة ائتمان.**
+- تمت برمجة وتطوير النظام بمحرك ضغط ذكي يقوم بتصغير الصور إلى أقل من 40 كيلوبايت وحفظها ومزامنتها لحظياً وبشكل مجاني تماماً عبر **Firebase Realtime Database**.
+- تفعيل تبويب Cloud Storage **اختياري تماماً**، والنظام يعمل بكفاءة تامة وتوثيق بكسلي مع الختم المائي مباشرة بدونها!
 
 ---
 

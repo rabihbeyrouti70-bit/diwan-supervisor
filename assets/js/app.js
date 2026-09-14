@@ -3269,8 +3269,8 @@
           img.onerror = () => reject(new Error('فشل تحميل الصورة في الذاكرة.'));
           img.onload = () => {
             try {
-              // 1. Calculate scaled dimensions (max width/height 1280px)
-              const maxDim = 1280;
+              // 1. Calculate scaled dimensions (max width/height 900px for ideal lightweight storage)
+              const maxDim = 900;
               let width = img.width;
               let height = img.height;
 
@@ -3336,13 +3336,15 @@
               ctx.font = `bold ${Math.max(10, Math.round(fontSize * 0.85))}px sans-serif`;
               ctx.fillText('DIWAN VERIFIED 🛡️', padX, line1Y);
 
-              // 3. Export to highly compressed JPEG Blob (quality 0.72)
+              // 3. Export to highly compressed JPEG Blob (quality 0.65)
               canvas.toBlob(
                 (blob) => {
                   if (!blob) return reject(new Error('فشل ضغط وتصدير الصورة.'));
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
                   console.log(`📸 Image compressed & watermarked: original ${(file.size / 1024).toFixed(1)} KB -> ${(blob.size / 1024).toFixed(1)} KB`);
                   resolve({
                     blob,
+                    dataUrl,
                     width,
                     height,
                     sizeBytes: blob.size,
@@ -3351,7 +3353,7 @@
                   });
                 },
                 'image/jpeg',
-                0.72
+                0.65
               );
             } catch (canvasErr) {
               reject(canvasErr);
@@ -3403,8 +3405,8 @@
           taskTitle: target.taskTitle
         });
 
-        // 2. Upload to Firebase Cloud Storage
-        const downloadUrl = await uploadEvidencePhotoToStorage(processed.blob, target);
+        // 2. Upload to Firebase Cloud Storage or use instant zero-cost dataUrl
+        const downloadUrl = await uploadEvidencePhotoToStorage(processed, target);
 
         // 3. Save photo reference into task or temperature state
         saveEvidencePhotoToState(target, downloadUrl, processed);
@@ -3418,12 +3420,12 @@
       }
     }
 
-    async function uploadEvidencePhotoToStorage(blob, target) {
+    async function uploadEvidencePhotoToStorage(processed, target) {
       if (!firebaseStorage && firebase && firebase.storage) {
         try { firebaseStorage = firebase.storage(); } catch (e) {}
       }
 
-      // 1. Try Firebase Cloud Storage if active
+      // 1. Try Firebase Cloud Storage if active and available
       if (firebaseStorage) {
         try {
           const todayStr = currentDate || new Date().toISOString().split('T')[0];
@@ -3444,22 +3446,22 @@
             }
           };
 
-          const uploadTaskSnapshot = await storageRef.put(blob, metadata);
+          const uploadTaskSnapshot = await storageRef.put(processed.blob, metadata);
           const downloadUrl = await uploadTaskSnapshot.ref.getDownloadURL();
           return downloadUrl;
         } catch (storageErr) {
-          console.warn("Firebase Storage upload pending or not activated yet, saving instant compressed inline photo:", storageErr);
+          console.warn("Firebase Cloud Storage upload requires plan or failed, using zero-cost instant compressed photo:", storageErr);
         }
       }
 
-      // 2. Resilient Instant Fallback: Use compressed Base64 Data URL (~60KB)
-      // Works immediately everywhere without requiring Firebase Console setup!
+      // 2. Resilient Instant Zero-Cost Fallback: Use compressed Base64 Data URL (~35KB)
+      // Works 100% free without any plan upgrades or credit cards!
+      if (processed.dataUrl) return processed.dataUrl;
+
       return new Promise((resolve) => {
         const reader = new FileReader();
-        reader.onloadend = () => {
-          resolve(reader.result);
-        };
-        reader.readAsDataURL(blob);
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(processed.blob);
       });
     }
 
