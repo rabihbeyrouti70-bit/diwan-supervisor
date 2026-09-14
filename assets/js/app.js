@@ -3399,6 +3399,10 @@
     }
 
     function triggerPhotoCapture(rawId, shiftId, taskTitle, type = 'task', replacePhotoId = null) {
+      if (currentUserRole === 'admin') {
+        alert('عذراً، التقاط وتوثيق وإعادة تصوير المهام مخصص لمشرفي الصالة الميدانيين داخل الفروع.');
+        return;
+      }
       if (!canEditShift(shiftId)) {
         alert('عذراً، لا يمكنك إرفاق أو تعديل صور لهذه الوردية لأنها خارج صلاحية ورديتك الحالية.');
         return;
@@ -3920,13 +3924,14 @@
       `;
 
       if (actionsEl) {
-        const canEdit = meta.shiftId ? canEditShift(meta.shiftId) : false;
+        const isSupervisor = (currentUserRole !== 'admin');
+        const canRetake = isSupervisor && (meta.shiftId ? canEditShift(meta.shiftId) : false) && (!meta.branchId || meta.branchId === currentBranchId);
         const isAdmin = (currentUserRole === 'admin');
-        const canDelete = (canEdit || isAdmin);
+        const canDelete = (canRetake || isAdmin);
 
         let btnsHtml = '';
 
-        if (canEdit && meta.rawId) {
+        if (canRetake && meta.rawId) {
           btnsHtml += `
             <button type="button" class="btn btn-sm btn-primary" style="background: #0284c7; border-color: #0369a1; font-size: 11px; font-weight: 800;" onclick="closeEvidencePhotoModal(); triggerPhotoCapture('${escapeSingleQuotes(meta.rawId)}', '${meta.shiftId}', '${escapeSingleQuotes(taskTitle)}', '${meta.type || 'task'}', '${meta.photoId || ''}')">🔄 إعادة التقاط الصورة (Retake)</button>
           `;
@@ -4462,14 +4467,14 @@
                                     <span>📸 ${photos.length > 1 ? `#${pIdx + 1}` : 'إثبات'}</span>
                                   </button>
                                 `).join('')}
-                                ${editable ? `
+                                ${(editable && currentUserRole !== 'admin') ? `
                                   <button type="button" class="btn-add-evidence" style="padding: 2px 6px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${sh.id}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="إضافة صورة إثبات أخرى لهذه المهمة">
                                     + صورة
                                   </button>
                                 ` : ''}
                               </div>
                             `;
-                          } else if (editable) {
+                          } else if (editable && currentUserRole !== 'admin') {
                             return `
                               <button type="button" class="btn-add-evidence" style="padding: 2px 6px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${sh.id}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="التقاط صورة لإثبات الإنجاز">
                                 📷 إرفاق
@@ -4546,14 +4551,14 @@
                                 <span>📸 ${photos.length > 1 ? `صورة #${pIdx + 1}` : 'صورة التوثيق'}</span>
                               </button>
                             `).join('')}
-                            ${editable ? `
+                            ${(editable && currentUserRole !== 'admin') ? `
                               <button type="button" class="btn-add-evidence" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="إضافة صورة أخرى للمهمة">
                                 ➕ إضافة صورة
                               </button>
                             ` : ''}
                           </div>
                         `;
-                      } else if (editable) {
+                      } else if (editable && currentUserRole !== 'admin') {
                         return `
                           <button type="button" class="btn-add-evidence" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="التقاط صورة حية لإثبات إنجاز المهمة">
                             📷 إرفاق صورة
@@ -4648,14 +4653,14 @@
                                     <span>📸 ${photos.length > 1 ? `#${pIdx + 1}` : 'العداد'}</span>
                                   </button>
                                 `).join('')}
-                                ${editable ? `
+                                ${(editable && currentUserRole !== 'admin') ? `
                                   <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${sh.id}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="إضافة صورة أخرى للعداد">
                                     + عداد
                                   </button>
                                 ` : ''}
                               </div>
                             `;
-                          } else if (editable) {
+                          } else if (editable && currentUserRole !== 'admin') {
                             return `
                               <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${sh.id}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="تصوير عداد الثلاجة للتوثيق">
                                 📷 العداد
