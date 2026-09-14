@@ -3422,31 +3422,45 @@
       if (!firebaseStorage && firebase && firebase.storage) {
         try { firebaseStorage = firebase.storage(); } catch (e) {}
       }
-      if (!firebaseStorage) {
-        throw new Error('خدمة التخزين السحابي Firebase Storage غير مهيأة.');
+
+      // 1. Try Firebase Cloud Storage if active
+      if (firebaseStorage) {
+        try {
+          const todayStr = currentDate || new Date().toISOString().split('T')[0];
+          const sanitizedId = encodeURIComponent(target.rawId).replace(/%/g, '_');
+          const fileName = `${sanitizedId}_${Date.now()}.jpg`;
+          const storagePath = `branch_evidence/${target.branchId}/${todayStr}/${target.shiftId}/${fileName}`;
+
+          const storageRef = firebaseStorage.ref(storagePath);
+          const metadata = {
+            contentType: 'image/jpeg',
+            customMetadata: {
+              branchId: target.branchId,
+              shiftId: target.shiftId,
+              taskId: target.rawId,
+              taskTitle: target.taskTitle || '',
+              supervisor: target.supervisor || currentSupervisor,
+              uploadedAt: String(Date.now())
+            }
+          };
+
+          const uploadTaskSnapshot = await storageRef.put(blob, metadata);
+          const downloadUrl = await uploadTaskSnapshot.ref.getDownloadURL();
+          return downloadUrl;
+        } catch (storageErr) {
+          console.warn("Firebase Storage upload pending or not activated yet, saving instant compressed inline photo:", storageErr);
+        }
       }
 
-      const todayStr = currentDate || new Date().toISOString().split('T')[0];
-      const sanitizedId = encodeURIComponent(target.rawId).replace(/%/g, '_');
-      const fileName = `${sanitizedId}_${Date.now()}.jpg`;
-      const storagePath = `branch_evidence/${target.branchId}/${todayStr}/${target.shiftId}/${fileName}`;
-
-      const storageRef = firebaseStorage.ref(storagePath);
-      const metadata = {
-        contentType: 'image/jpeg',
-        customMetadata: {
-          branchId: target.branchId,
-          shiftId: target.shiftId,
-          taskId: target.rawId,
-          taskTitle: target.taskTitle || '',
-          supervisor: target.supervisor || currentSupervisor,
-          uploadedAt: String(Date.now())
-        }
-      };
-
-      const uploadTaskSnapshot = await storageRef.put(blob, metadata);
-      const downloadUrl = await uploadTaskSnapshot.ref.getDownloadURL();
-      return downloadUrl;
+      // 2. Resilient Instant Fallback: Use compressed Base64 Data URL (~60KB)
+      // Works immediately everywhere without requiring Firebase Console setup!
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve(reader.result);
+        };
+        reader.readAsDataURL(blob);
+      });
     }
 
     function saveEvidencePhotoToState(target, downloadUrl, processed) {
