@@ -492,7 +492,7 @@
     const APP_CONFIG = {
       PIN_LENGTH: 4,
       MIN_PIN_LENGTH: 4,
-      MAX_PIN_LENGTH: 6,
+      MAX_PIN_LENGTH: 4,
       MAX_ATTEMPTS: 5,
       LOCKOUT_DURATION: 30, // seconds (local cooldown)
       CLOUD_LOCKOUT_DURATION_MS: 15 * 60 * 1000, // 15 minutes cloud lockout on 5 consecutive failures
@@ -1909,7 +1909,7 @@
     function pressKey(num) {
       if (lockoutRemaining > 0) return;
       const input = document.getElementById('authPinInput');
-      const maxLen = APP_CONFIG.MAX_PIN_LENGTH || 6;
+      const maxLen = APP_CONFIG.PIN_LENGTH || 4;
       if (input.value.length < maxLen) {
         input.value += num;
         if (input.value.length === maxLen) {
@@ -1979,10 +1979,9 @@
           }
         }
 
-        const minLen = APP_CONFIG.MIN_PIN_LENGTH || 4;
-        const maxLen = APP_CONFIG.MAX_PIN_LENGTH || 6;
-        if (!pin || pin.length < minLen || pin.length > maxLen || !/^\d+$/.test(pin)) {
-          errorBox.innerText = `يرجى إدخال رمز PIN صالح (من ${minLen} إلى ${maxLen} أرقام).`;
+        const pinLen = APP_CONFIG.PIN_LENGTH || 4;
+        if (!pin || pin.length !== pinLen || !/^\d+$/.test(pin)) {
+          errorBox.innerText = `يرجى إدخال رمز PIN صالح مكون من ${pinLen} أرقام.`;
           return;
         }
 
@@ -5573,10 +5572,9 @@
 
       if (!id) {
         // ADD NEW SUPERVISOR
-        const minL = APP_CONFIG.MIN_PIN_LENGTH || 4;
-        const maxL = APP_CONFIG.MAX_PIN_LENGTH || 6;
-        if (!pin || pin.length < minL || pin.length > maxL || !/^\d+$/.test(pin)) {
-          errBox.innerText = `يرجى إدخال رمز PIN مكون من ${minL} إلى ${maxL} أرقام عددية.`;
+        const pinLen = APP_CONFIG.PIN_LENGTH || 4;
+        if (!pin || pin.length !== pinLen || !/^\d+$/.test(pin)) {
+          errBox.innerText = `يرجى إدخال رمز PIN مكون من ${pinLen} أرقام عددية.`;
           return;
         }
         if (pin !== confirmPin) {
@@ -5618,10 +5616,9 @@
 
         // If PIN was entered, update it with salt
         if (pin) {
-          const minL = APP_CONFIG.MIN_PIN_LENGTH || 4;
-          const maxL = APP_CONFIG.MAX_PIN_LENGTH || 6;
-          if (pin.length < minL || pin.length > maxL || !/^\d+$/.test(pin)) {
-            errBox.innerText = `رمز PIN يجب أن يتكون من ${minL} إلى ${maxL} أرقام عددية.`;
+          const pinLen = APP_CONFIG.PIN_LENGTH || 4;
+          if (pin.length !== pinLen || !/^\d+$/.test(pin)) {
+            errBox.innerText = `رمز PIN يجب أن يتكون من ${pinLen} أرقام عددية.`;
             return;
           }
           if (pin !== confirmPin) {
