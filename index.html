@@ -1444,6 +1444,9 @@
             <option value="night">🌙 ليلي</option>
           </select>
           <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px;" onclick="refreshEvidenceGallery(true)">🔄 تحديث</button>
+          <button id="btnCleanupAllEvidence" type="button" class="btn btn-sm btn-outline-white role-hidden" data-role-hidden="true" style="display: none; font-size: 11px; padding: 4px 8px; color: #fca5a5; border-color: #ef4444;" onclick="cleanupAllTodayPhotosFromCloud()" title="حذف وتفريغ جميع صور اليوم المشاهدة من السحابة لتوفير المساحة وتجنب التراكم">
+            🧹 تفريغ صور اليوم من السحابة
+          </button>
         </div>
       </div>
       <div class="modal-body" id="evidenceGalleryBody" style="overflow-y: auto; padding: 16px; flex: 1;">
@@ -1497,6 +1500,6 @@
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789236000"></script>
+  <script src="assets/js/app.js?v=1789237500"></script>
 </body>
 </html>

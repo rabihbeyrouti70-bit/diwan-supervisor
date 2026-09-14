@@ -1183,6 +1183,8 @@
       // 3. Shared between General Manager AND Branch Manager (admin + branch_manager)
       const btnEvidenceGal = document.getElementById('btnHqEvidenceGallery');
       setElementRoleVisibility(btnEvidenceGal, isAnyManager, 'inline-flex');
+      const btnCleanupAll = document.getElementById('btnCleanupAllEvidence');
+      setElementRoleVisibility(btnCleanupAll, isGeneralManager, 'inline-flex');
       setElementRoleVisibility(btnManage, isAnyManager, 'inline-flex');
       setElementRoleVisibility(btnShifts, isAnyManager, 'inline-flex');
       setElementRoleVisibility(btnDirHead, isAnyManager, 'inline-flex');
@@ -3379,9 +3381,26 @@
       });
     }
 
-    function triggerPhotoCapture(rawId, shiftId, taskTitle, type = 'task') {
+    function getTaskPhotos(shData) {
+      if (!shData || typeof shData !== 'object') return [];
+      if (Array.isArray(shData.photos) && shData.photos.length > 0) {
+        return shData.photos;
+      }
+      if (shData.photoUrl) {
+        return [{
+          id: 'legacy_' + (shData.updatedAt || '0'),
+          url: shData.photoUrl,
+          by: shData.photoBy || shData.updatedBy || '',
+          time: shData.photoTime || shData.updatedAt || '',
+          timestamp: 0
+        }];
+      }
+      return [];
+    }
+
+    function triggerPhotoCapture(rawId, shiftId, taskTitle, type = 'task', replacePhotoId = null) {
       if (!canEditShift(shiftId)) {
-        alert('عذراً، لا يمكنك إرفاق صور لهذه الوردية لأنها خارج صلاحية ورديتك الحالية.');
+        alert('عذراً، لا يمكنك إرفاق أو تعديل صور لهذه الوردية لأنها خارج صلاحية ورديتك الحالية.');
         return;
       }
 
@@ -3391,7 +3410,8 @@
         taskTitle,
         type,
         branchId: currentBranchId,
-        supervisor: currentSupervisor
+        supervisor: currentSupervisor,
+        replacePhotoId: replacePhotoId || null
       };
 
       const fileInput = document.getElementById('evidenceCameraInput');
@@ -3425,7 +3445,7 @@
         // 3. Save photo reference into task or temperature state
         saveEvidencePhotoToState(target, downloadUrl, processed);
 
-        showToast('✅ تم توثيق المهمة بالصورة بنجاح!');
+        showToast(target.replacePhotoId ? '✅ تم تحديث وإعادة التقاط الصورة بنجاح!' : '✅ تم توثيق المهمة بالصورة بنجاح!');
       } catch (err) {
         console.error('Evidence photo process error:', err);
         alert('تعذر إرفاق الصورة: ' + (err.message || 'حدث خطأ أثناء معالجة الصورة'));
@@ -3449,36 +3469,68 @@
     }
 
     function saveEvidencePhotoToState(target, downloadUrl, processed) {
-      if (target.type === 'temp') {
+      const isTemp = (target.type === 'temp');
+      if (isTemp) {
         if (!state.temperatures) state.temperatures = {};
         if (!state.temperatures[target.rawId]) state.temperatures[target.rawId] = {};
         if (!state.temperatures[target.rawId][target.shiftId]) state.temperatures[target.rawId][target.shiftId] = {};
-        state.temperatures[target.rawId][target.shiftId].photoUrl = downloadUrl;
-        state.temperatures[target.rawId][target.shiftId].photoBy = target.supervisor;
-        state.temperatures[target.rawId][target.shiftId].photoTime = processed.timeFormatted;
       } else {
         if (!state.items) state.items = {};
         if (!state.items[target.rawId]) state.items[target.rawId] = {};
         if (!state.items[target.rawId][target.shiftId]) state.items[target.rawId][target.shiftId] = { status: 'done' };
 
         // Auto-mark task as done if it was pending
-        if (!state.items[target.rawId][target.shiftId].status || state.items[target.rawId][target.shiftId].status === 'pending') {
-          state.items[target.rawId][target.shiftId].status = 'done';
-          state.items[target.rawId][target.shiftId].updatedBy = target.supervisor;
-          state.items[target.rawId][target.shiftId].updatedAt = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+        const slot = state.items[target.rawId][target.shiftId];
+        if (!slot.status || slot.status === 'pending') {
+          slot.status = 'done';
+          slot.updatedBy = target.supervisor;
+          slot.updatedAt = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
         }
-
-        state.items[target.rawId][target.shiftId].photoUrl = downloadUrl;
-        state.items[target.rawId][target.shiftId].photoBy = target.supervisor;
-        state.items[target.rawId][target.shiftId].photoTime = processed.timeFormatted;
       }
+
+      const targetSlot = isTemp ? state.temperatures[target.rawId][target.shiftId] : state.items[target.rawId][target.shiftId];
+
+      // Initialize photos array
+      if (!Array.isArray(targetSlot.photos)) {
+        targetSlot.photos = targetSlot.photoUrl ? [{
+          id: 'photo_' + (targetSlot.updatedAt ? Date.now() : 'initial'),
+          url: targetSlot.photoUrl,
+          by: targetSlot.photoBy || target.supervisor,
+          time: targetSlot.photoTime || processed.timeFormatted,
+          timestamp: Date.now() - 1000
+        }] : [];
+      }
+
+      const newPhotoEntry = {
+        id: target.replacePhotoId || ('photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)),
+        url: downloadUrl,
+        by: target.supervisor,
+        time: processed.timeFormatted,
+        timestamp: Date.now()
+      };
+
+      if (target.replacePhotoId) {
+        const idx = targetSlot.photos.findIndex(p => p.id === target.replacePhotoId);
+        if (idx >= 0) {
+          targetSlot.photos[idx] = newPhotoEntry;
+        } else {
+          targetSlot.photos.push(newPhotoEntry);
+        }
+      } else {
+        targetSlot.photos.push(newPhotoEntry);
+      }
+
+      // Backward compatible pointers to the latest photo
+      targetSlot.photoUrl = downloadUrl;
+      targetSlot.photoBy = target.supervisor;
+      targetSlot.photoTime = processed.timeFormatted;
 
       saveState();
       renderSections();
     }
 
-    function deleteEvidencePhoto(rawId, shiftId, type = 'task') {
-      if (!canEditShift(shiftId)) {
+    function deleteEvidencePhoto(rawId, shiftId, type = 'task', photoId = null) {
+      if (!canEditShift(shiftId) && currentUserRole !== 'admin') {
         alert('عذراً، لا يمكنك حذف الصورة لأنها خارج صلاحية ورديتك.');
         return;
       }
@@ -3487,17 +3539,26 @@
 
       closeEvidencePhotoModal();
 
-      if (type === 'temp') {
-        if (state.temperatures && state.temperatures[rawId] && state.temperatures[rawId][shiftId]) {
-          delete state.temperatures[rawId][shiftId].photoUrl;
-          delete state.temperatures[rawId][shiftId].photoBy;
-          delete state.temperatures[rawId][shiftId].photoTime;
-        }
-      } else {
-        if (state.items && state.items[rawId] && state.items[rawId][shiftId]) {
-          delete state.items[rawId][shiftId].photoUrl;
-          delete state.items[rawId][shiftId].photoBy;
-          delete state.items[rawId][shiftId].photoTime;
+      const container = (type === 'temp') ? state.temperatures : state.items;
+      if (container && container[rawId] && container[rawId][shiftId]) {
+        const slot = container[rawId][shiftId];
+        if (Array.isArray(slot.photos) && photoId) {
+          slot.photos = slot.photos.filter(p => p.id !== photoId);
+          if (slot.photos.length > 0) {
+            slot.photoUrl = slot.photos[slot.photos.length - 1].url;
+            slot.photoBy = slot.photos[slot.photos.length - 1].by;
+            slot.photoTime = slot.photos[slot.photos.length - 1].time;
+          } else {
+            delete slot.photos;
+            delete slot.photoUrl;
+            delete slot.photoBy;
+            delete slot.photoTime;
+          }
+        } else {
+          delete slot.photos;
+          delete slot.photoUrl;
+          delete slot.photoBy;
+          delete slot.photoTime;
         }
       }
 
@@ -3506,31 +3567,259 @@
       showToast('🗑️ تم حذف صورة التوثيق.');
     }
 
-    function viewEvidencePhoto(rawId, shiftId, type = 'task', targetBranchId = null) {
+    async function deleteEvidencePhotoFromCloud(branchId, rawId, shiftId, photoId = null, type = 'task') {
+      const isAdmin = (currentUserRole === 'admin');
+      const isShiftEditor = canEditShift(shiftId) && (branchId === currentBranchId);
+
+      if (!isAdmin && !isShiftEditor) {
+        alert('عذراً، حذف الصور من السحابة مخصص للمدير العام أو مشرف الوردية الحالي.');
+        return;
+      }
+
+      if (!confirm('هل أنت متأكد من حذف صورة التوثيق هذه من السحابة لتوفير مساحة التخزين؟\n(ستظل حالة إنجاز المهمة مؤكدة دون تأثر)')) {
+        return;
+      }
+
+      closeEvidencePhotoModal();
+
+      try {
+        // 1. If targeting current active branch, update local state first
+        if (branchId === currentBranchId) {
+          const container = (type === 'temp') ? state.temperatures : state.items;
+          if (container && container[rawId] && container[rawId][shiftId]) {
+            const slot = container[rawId][shiftId];
+            if (Array.isArray(slot.photos) && photoId) {
+              slot.photos = slot.photos.filter(p => p.id !== photoId);
+              if (slot.photos.length > 0) {
+                slot.photoUrl = slot.photos[slot.photos.length - 1].url;
+                slot.photoBy = slot.photos[slot.photos.length - 1].by;
+                slot.photoTime = slot.photos[slot.photos.length - 1].time;
+              } else {
+                delete slot.photos;
+                delete slot.photoUrl;
+                delete slot.photoBy;
+                delete slot.photoTime;
+              }
+            } else {
+              delete slot.photos;
+              delete slot.photoUrl;
+              delete slot.photoBy;
+              delete slot.photoTime;
+            }
+            saveState();
+            renderSections();
+          }
+        }
+
+        // 2. Direct Cloud Deletion on Firebase RTDB (works for any branch)
+        if (firebaseDb) {
+          const nodeType = (type === 'temp') ? 'temperatures' : 'items';
+          const path = `branches/${branchId}/daily_ops/${currentDate}/${nodeType}/${encodeFirebaseKey(rawId)}/${shiftId}`;
+          const ref = firebaseDb.ref(path);
+
+          const snapshot = await ref.once('value');
+          const slotVal = snapshot.val();
+          if (slotVal) {
+            let photos = Array.isArray(slotVal.photos) ? slotVal.photos : [];
+            if (photos.length === 0 && slotVal.photoUrl) {
+              photos = [{ id: photoId || 'legacy', url: slotVal.photoUrl }];
+            }
+
+            if (photoId) {
+              photos = photos.filter(p => p.id !== photoId);
+            } else {
+              photos = [];
+            }
+
+            if (photos.length > 0) {
+              await ref.update({
+                photos: photos,
+                photoUrl: photos[photos.length - 1].url || null,
+                photoBy: photos[photos.length - 1].by || null,
+                photoTime: photos[photos.length - 1].time || null
+              });
+            } else {
+              await ref.update({
+                photos: null,
+                photoUrl: null,
+                photoBy: null,
+                photoTime: null
+              });
+            }
+          }
+        }
+
+        // 3. Update in-memory hqTodayPhotos
+        hqTodayPhotos = hqTodayPhotos.filter(p => {
+          if (p.branchId === branchId && p.rawId === rawId && p.shiftId === shiftId) {
+            if (photoId && p.photoId) {
+              return p.photoId !== photoId;
+            }
+            return false;
+          }
+          return true;
+        });
+
+        updateEvidenceCounters();
+        renderEvidenceGallery();
+        showToast('🗑️ تم حذف الصورة من السحابة وتفريغ مساحة التخزين بنجاح.');
+      } catch (err) {
+        console.error('Cloud photo deletion error:', err);
+        alert('تعذر حذف الصورة من السحابة: ' + (err.message || 'حدث خطأ'));
+      }
+    }
+
+    async function cleanupAllTodayPhotosFromCloud() {
+      if (currentUserRole !== 'admin') {
+        alert('عذراً، هذه الصلاحية مخصصة للمدير العام فقط.');
+        return;
+      }
+
+      const total = hqTodayPhotos.length;
+      if (total === 0) {
+        alert('لا توجد صور توثيق مسجلة في السحابة لهذا اليوم.');
+        return;
+      }
+
+      if (!confirm(`هل أنت متأكد من تفريغ وحذف جميع صور اليوم (${total} صورة) من السحابة لتوفير مساحة التخزين ومنع تراكمها؟\n\nملاحظة: ستظل كافة حالات إنجاز المهام ✅ وأسماء المشرفين وتوقيتاتهم مسجلة وموثقة كما هي.`)) {
+        return;
+      }
+
+      showToast('⏳ جاري تفريغ صور اليوم من السحابة...');
+
+      try {
+        const branchesToClean = new Set(hqTodayPhotos.map(p => p.branchId));
+
+        for (const bId of branchesToClean) {
+          // If current branch, clean local state
+          if (bId === currentBranchId) {
+            if (state.items) {
+              Object.keys(state.items).forEach(rawId => {
+                const itSh = state.items[rawId];
+                if (itSh) {
+                  Object.keys(itSh).forEach(shId => {
+                    delete itSh[shId].photos;
+                    delete itSh[shId].photoUrl;
+                    delete itSh[shId].photoBy;
+                    delete itSh[shId].photoTime;
+                  });
+                }
+              });
+            }
+            if (state.temperatures) {
+              Object.keys(state.temperatures).forEach(tName => {
+                const tSh = state.temperatures[tName];
+                if (tSh) {
+                  Object.keys(tSh).forEach(shId => {
+                    delete tSh[shId].photos;
+                    delete tSh[shId].photoUrl;
+                    delete tSh[shId].photoBy;
+                    delete tSh[shId].photoTime;
+                  });
+                }
+              });
+            }
+            saveState();
+          }
+
+          // Clean on Firebase RTDB
+          if (firebaseDb) {
+            const path = `branches/${bId}/daily_ops/${currentDate}`;
+            const ref = firebaseDb.ref(path);
+            const snapshot = await ref.once('value');
+            const dayOps = snapshot.val();
+            if (dayOps) {
+              let modified = false;
+              if (dayOps.items) {
+                Object.keys(dayOps.items).forEach(k => {
+                  const shifts = dayOps.items[k];
+                  if (shifts && typeof shifts === 'object') {
+                    Object.keys(shifts).forEach(sh => {
+                      if (shifts[sh].photoUrl || shifts[sh].photos) {
+                        delete shifts[sh].photos;
+                        delete shifts[sh].photoUrl;
+                        delete shifts[sh].photoBy;
+                        delete shifts[sh].photoTime;
+                        modified = true;
+                      }
+                    });
+                  }
+                });
+              }
+              if (dayOps.temperatures) {
+                Object.keys(dayOps.temperatures).forEach(k => {
+                  const shifts = dayOps.temperatures[k];
+                  if (shifts && typeof shifts === 'object') {
+                    Object.keys(shifts).forEach(sh => {
+                      if (shifts[sh].photoUrl || shifts[sh].photos) {
+                        delete shifts[sh].photos;
+                        delete shifts[sh].photoUrl;
+                        delete shifts[sh].photoBy;
+                        delete shifts[sh].photoTime;
+                        modified = true;
+                      }
+                    });
+                  }
+                });
+              }
+              if (modified) {
+                await ref.set(dayOps);
+              }
+            }
+          }
+        }
+
+        hqTodayPhotos = [];
+        updateEvidenceCounters();
+        renderEvidenceGallery();
+        renderSections();
+        showToast(`✅ تم تفريغ ${total} صورة بنجاح من السحابة!`);
+      } catch (err) {
+        console.error('Batch cloud cleanup error:', err);
+        alert('تعذر استكمال تفريغ الصور من السحابة: ' + (err.message || 'خطأ غير متوقع'));
+      }
+    }
+
+    function viewEvidencePhoto(rawId, shiftId, type = 'task', targetBranchId = null, targetPhotoId = null) {
       const bId = targetBranchId || currentBranchId;
-      let photoData = null;
+      let selectedPhotoUrl = null;
       let taskTitle = '';
+      let supervisor = '';
+      let timeStr = '';
+      let resolvedPhotoId = targetPhotoId;
 
       if (bId === currentBranchId) {
-        if (type === 'temp') {
-          photoData = (state.temperatures && state.temperatures[rawId]) ? state.temperatures[rawId][shiftId] : null;
-          const conf = (typeof getBranchTempRanges === 'function' ? getBranchTempRanges(currentBranchId) : {})[rawId] || {};
-          taskTitle = 'قراءة عداد ثلاجة: ' + (conf.ar || rawId);
-        } else {
-          photoData = (state.items && state.items[rawId]) ? state.items[rawId][shiftId] : null;
-          taskTitle = rawId;
+        const container = (type === 'temp') ? state.temperatures : state.items;
+        const slot = (container && container[rawId]) ? container[rawId][shiftId] : null;
+        if (slot) {
+          const photos = getTaskPhotos(slot);
+          if (photos.length > 0) {
+            const matched = targetPhotoId ? photos.find(p => p.id === targetPhotoId) : photos[photos.length - 1];
+            const pObj = matched || photos[0];
+            selectedPhotoUrl = pObj.url;
+            resolvedPhotoId = pObj.id;
+            supervisor = pObj.by || slot.photoBy || slot.updatedBy || '';
+            timeStr = pObj.time || slot.photoTime || slot.updatedAt || '';
+          }
+          if (type === 'temp') {
+            const conf = (typeof getBranchTempRanges === 'function' ? getBranchTempRanges(currentBranchId) : {})[rawId] || {};
+            taskTitle = 'قراءة عداد ثلاجة: ' + (conf.ar || rawId);
+          } else {
+            taskTitle = rawId;
+          }
         }
       }
 
-      if (!photoData || !photoData.photoUrl) {
+      if (!selectedPhotoUrl) {
         // Fallback: look up in hqTodayPhotos
-        const match = (hqTodayPhotos || []).find(p => p.branchId === bId && p.rawId === rawId && p.shiftId === shiftId && (type ? p.type === type : true));
+        const match = (hqTodayPhotos || []).find(p => p.branchId === bId && p.rawId === rawId && p.shiftId === shiftId && (type ? p.type === type : true) && (!targetPhotoId || p.photoId === targetPhotoId));
         if (match && match.photoUrl) {
           openEvidencePhotoModal(match.photoUrl, match.title || taskTitle || rawId, {
             rawId: match.rawId,
             shiftId: match.shiftId,
             branchId: match.branchId,
             type: match.type,
+            photoId: match.photoId,
             supervisor: match.supervisor,
             time: match.time
           });
@@ -3540,13 +3829,14 @@
         return;
       }
 
-      openEvidencePhotoModal(photoData.photoUrl, taskTitle, {
+      openEvidencePhotoModal(selectedPhotoUrl, taskTitle, {
         rawId: rawId,
         shiftId: shiftId,
         type: type,
         branchId: bId,
-        supervisor: photoData.photoBy || photoData.updatedBy || '',
-        time: photoData.photoTime || photoData.updatedAt || ''
+        photoId: resolvedPhotoId,
+        supervisor: supervisor,
+        time: timeStr
       });
     }
 
@@ -3591,16 +3881,28 @@
 
       if (actionsEl) {
         const canEdit = meta.shiftId ? canEditShift(meta.shiftId) : false;
+        const isAdmin = (currentUserRole === 'admin');
+        const canDelete = (canEdit || isAdmin);
+
+        let btnsHtml = '';
+
         if (canEdit && meta.rawId) {
-          actionsEl.innerHTML = `
-            <button type="button" class="btn btn-sm btn-outline-white" style="color: #ef4444; border-color: #ef4444; font-size: 11px;" onclick="deleteEvidencePhoto('${escapeSingleQuotes(meta.rawId)}', '${meta.shiftId}', '${meta.type || 'task'}')">🗑️ حذف الصورة</button>
-            <button type="button" class="btn btn-sm btn-primary" style="background: #0284c7; border-color: #0369a1; font-size: 11px;" onclick="closeEvidencePhotoModal(); triggerPhotoCapture('${escapeSingleQuotes(meta.rawId)}', '${meta.shiftId}', '${escapeSingleQuotes(taskTitle)}', '${meta.type || 'task'}')">🔄 إعادة التقاط</button>
-          `;
-        } else {
-          actionsEl.innerHTML = `
-            <a href="${photoUrl}" target="_blank" download="evidence_${Date.now()}.jpg" class="btn btn-sm btn-outline-white" style="font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">⬇️ فتح الأصل</a>
+          btnsHtml += `
+            <button type="button" class="btn btn-sm btn-primary" style="background: #0284c7; border-color: #0369a1; font-size: 11px; font-weight: 800;" onclick="closeEvidencePhotoModal(); triggerPhotoCapture('${escapeSingleQuotes(meta.rawId)}', '${meta.shiftId}', '${escapeSingleQuotes(taskTitle)}', '${meta.type || 'task'}', '${meta.photoId || ''}')">🔄 إعادة التقاط الصورة (Retake)</button>
           `;
         }
+
+        if (canDelete && meta.rawId) {
+          btnsHtml += `
+            <button type="button" class="btn btn-sm btn-outline-white" style="color: #ef4444; border-color: #ef4444; font-size: 11px; font-weight: 700;" onclick="deleteEvidencePhotoFromCloud('${meta.branchId || currentBranchId}', '${escapeSingleQuotes(meta.rawId)}', '${meta.shiftId}', '${meta.photoId || ''}', '${meta.type || 'task'}')">🗑️ حذف من السحابة</button>
+          `;
+        }
+
+        btnsHtml += `
+          <a href="${photoUrl}" target="_blank" download="evidence_${Date.now()}.jpg" class="btn btn-sm btn-outline-white" style="font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">⬇️ تحميل الأصل</a>
+        `;
+
+        actionsEl.innerHTML = btnsHtml;
       }
 
       modal.style.display = 'flex';
@@ -3675,28 +3977,33 @@
           if (itShifts && typeof itShifts === 'object') {
             Object.keys(itShifts).forEach(shId => {
               const shData = itShifts[shId];
-              if (shData && shData.photoUrl) {
-                const uniqueId = `${branchId}_task_${rawId}_${shId}`;
-                const photoObj = {
-                  id: uniqueId,
-                  branchId: branchId,
-                  branchName: bName,
-                  type: 'task',
-                  rawId: rawId,
-                  title: rawId,
-                  shiftId: shId,
-                  shiftName: getShiftName(branchId, shId),
-                  supervisor: shData.photoBy || shData.updatedBy || 'مشرف الصالة',
-                  time: shData.photoTime || shData.updatedAt || '',
-                  photoUrl: shData.photoUrl
-                };
-                updatedPhotos.push(photoObj);
+              if (shData) {
+                const photos = getTaskPhotos(shData);
+                photos.forEach((p, pIdx) => {
+                  const pId = p.id || ('idx_' + pIdx);
+                  const uniqueId = `${branchId}_task_${rawId}_${shId}_${pId}`;
+                  const photoObj = {
+                    id: uniqueId,
+                    photoId: p.id || '',
+                    branchId: branchId,
+                    branchName: bName,
+                    type: 'task',
+                    rawId: rawId,
+                    title: rawId,
+                    shiftId: shId,
+                    shiftName: getShiftName(branchId, shId),
+                    supervisor: p.by || shData.photoBy || shData.updatedBy || 'مشرف الصالة',
+                    time: p.time || shData.photoTime || shData.updatedAt || '',
+                    photoUrl: p.url
+                  };
+                  updatedPhotos.push(photoObj);
 
-                // Notify manager if this is a newly arrived photo
-                if (!isHqEvidenceInitialLoad && !hqEvidenceKnownIds.has(uniqueId) && currentUserRole === 'admin') {
-                  showToast(`📸 إثبات جديد بالصورة: [${bName} - ${photoObj.supervisor} - ${rawId}]`);
-                }
-                hqEvidenceKnownIds.add(uniqueId);
+                  // Notify manager if this is a newly arrived photo
+                  if (!isHqEvidenceInitialLoad && !hqEvidenceKnownIds.has(uniqueId) && currentUserRole === 'admin') {
+                    showToast(`📸 إثبات جديد بالصورة: [${bName} - ${photoObj.supervisor} - ${rawId}]`);
+                  }
+                  hqEvidenceKnownIds.add(uniqueId);
+                });
               }
             });
           }
@@ -3711,28 +4018,33 @@
           if (tShifts && typeof tShifts === 'object') {
             Object.keys(tShifts).forEach(shId => {
               const shData = tShifts[shId];
-              if (shData && shData.photoUrl) {
-                const uniqueId = `${branchId}_temp_${tName}_${shId}`;
+              if (shData) {
+                const photos = getTaskPhotos(shData);
                 const tTitle = 'قراءة ثلاجة: ' + ((ranges[tName] && ranges[tName].ar) || tName);
-                const photoObj = {
-                  id: uniqueId,
-                  branchId: branchId,
-                  branchName: bName,
-                  type: 'temp',
-                  rawId: tName,
-                  title: tTitle,
-                  shiftId: shId,
-                  shiftName: getShiftName(branchId, shId),
-                  supervisor: shData.photoBy || shData.updatedBy || 'مشرف الصالة',
-                  time: shData.photoTime || shData.updatedAt || '',
-                  photoUrl: shData.photoUrl
-                };
-                updatedPhotos.push(photoObj);
+                photos.forEach((p, pIdx) => {
+                  const pId = p.id || ('idx_' + pIdx);
+                  const uniqueId = `${branchId}_temp_${tName}_${shId}_${pId}`;
+                  const photoObj = {
+                    id: uniqueId,
+                    photoId: p.id || '',
+                    branchId: branchId,
+                    branchName: bName,
+                    type: 'temp',
+                    rawId: tName,
+                    title: tTitle,
+                    shiftId: shId,
+                    shiftName: getShiftName(branchId, shId),
+                    supervisor: p.by || shData.photoBy || shData.updatedBy || 'مشرف الصالة',
+                    time: p.time || shData.photoTime || shData.updatedAt || '',
+                    photoUrl: p.url
+                  };
+                  updatedPhotos.push(photoObj);
 
-                if (!isHqEvidenceInitialLoad && !hqEvidenceKnownIds.has(uniqueId) && currentUserRole === 'admin') {
-                  showToast(`📸 توثيق عداد ثلاجة: [${bName} - ${photoObj.supervisor} - ${tTitle}]`);
-                }
-                hqEvidenceKnownIds.add(uniqueId);
+                  if (!isHqEvidenceInitialLoad && !hqEvidenceKnownIds.has(uniqueId) && currentUserRole === 'admin') {
+                    showToast(`📸 توثيق عداد ثلاجة: [${bName} - ${photoObj.supervisor} - ${tTitle}]`);
+                  }
+                  hqEvidenceKnownIds.add(uniqueId);
+                });
               }
             });
           }
@@ -3860,7 +4172,7 @@
                   <span style="font-size: 12px; font-weight: 800; color: #60a5fa;">🏢 ${escapeHtml(p.branchName)}</span>
                   <span style="font-size: 11px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${shIcon} ${escapeHtml(p.shiftName)}</span>
                 </div>
-                <div style="position: relative; height: 180px; background: #020617; cursor: pointer; display: flex; align-items: center; justify-content: center; overflow: hidden;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(p.photoUrl)}', '${escapeSingleQuotes(p.title)}', { rawId: '${escapeSingleQuotes(p.rawId)}', shiftId: '${p.shiftId}', branchId: '${p.branchId}', type: '${p.type}', supervisor: '${escapeSingleQuotes(p.supervisor)}', time: '${escapeSingleQuotes(p.time)}' })">
+                <div style="position: relative; height: 180px; background: #020617; cursor: pointer; display: flex; align-items: center; justify-content: center; overflow: hidden;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(p.photoUrl)}', '${escapeSingleQuotes(p.title)}', { rawId: '${escapeSingleQuotes(p.rawId)}', shiftId: '${p.shiftId}', branchId: '${p.branchId}', type: '${p.type}', photoId: '${p.photoId || ''}', supervisor: '${escapeSingleQuotes(p.supervisor)}', time: '${escapeSingleQuotes(p.time)}' })">
                   <img src="${p.photoUrl}" alt="إثبات" style="width: 100%; height: 100%; object-fit: cover;">
                   <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.25); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;" onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='0'">
                     <span style="background: rgba(0,0,0,0.75); color: white; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 700;">🔍 تكبير الصورة</span>
@@ -3875,10 +4187,11 @@
                     </div>
                   </div>
                   <div style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-sm btn-primary" style="flex: 1; font-size: 11px; padding: 4px 8px; justify-content: center; background: #0284c7; border-color: #0369a1;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(p.photoUrl)}', '${escapeSingleQuotes(p.title)}', { rawId: '${escapeSingleQuotes(p.rawId)}', shiftId: '${p.shiftId}', branchId: '${p.branchId}', type: '${p.type}', supervisor: '${escapeSingleQuotes(p.supervisor)}', time: '${escapeSingleQuotes(p.time)}' })">🔍 تكبير</button>
+                    <button type="button" class="btn btn-sm btn-primary" style="flex: 1; font-size: 11px; padding: 4px 8px; justify-content: center; background: #0284c7; border-color: #0369a1;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(p.photoUrl)}', '${escapeSingleQuotes(p.title)}', { rawId: '${escapeSingleQuotes(p.rawId)}', shiftId: '${p.shiftId}', branchId: '${p.branchId}', type: '${p.type}', photoId: '${p.photoId || ''}', supervisor: '${escapeSingleQuotes(p.supervisor)}', time: '${escapeSingleQuotes(p.time)}' })">🔍 تكبير</button>
                     <a href="${p.photoUrl}" target="_blank" download="evidence_${p.branchId}_${p.shiftId}.jpg" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; text-decoration: none; display: inline-flex; align-items: center;" title="تحميل الأصل">⬇️</a>
                     ${currentUserRole === 'admin' ? `
-                      <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; color: #38bdf8; border-color: #0284c7;" onclick="closeEvidenceGalleryModal(); onAdminSwitchBranch('${p.branchId}');" title="الانتقال إلى ورقة هذا الفرع">🏢 انتقل للفرع</button>
+                      <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; color: #ef4444; border-color: #ef4444;" onclick="deleteEvidencePhotoFromCloud('${p.branchId}', '${escapeSingleQuotes(p.rawId)}', '${p.shiftId}', '${p.photoId || ''}', '${p.type}')" title="حذف هذه الصورة من السحابة لتوفير المساحة ومنع تراكمها">🗑️ مسح</button>
+                      <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; color: #38bdf8; border-color: #0284c7;" onclick="closeEvidenceGalleryModal(); onAdminSwitchBranch('${p.branchId}');" title="الانتقال إلى ورقة هذا الفرع">🏢 الفرع</button>
                     ` : ''}
                   </div>
                 </div>
@@ -3950,14 +4263,20 @@
         sec.items.forEach(it => {
           const itemEntry = state.items[it.rawId] || {};
           Object.values(itemEntry).forEach(shObj => {
-            if (shObj && shObj.photoUrl) secPhotoCount++;
+            if (shObj) {
+              const pList = getTaskPhotos(shObj);
+              secPhotoCount += pList.length;
+            }
           });
         });
         if (sec.temps) {
           sec.temps.forEach(tName => {
             const tEntry = (state.temperatures && state.temperatures[tName]) || {};
             Object.values(tEntry).forEach(shObj => {
-              if (shObj && shObj.photoUrl) secPhotoCount++;
+              if (shObj) {
+                const pList = getTaskPhotos(shObj);
+                secPhotoCount += pList.length;
+              }
             });
           });
         }
@@ -4046,17 +4365,34 @@
                         <button type="button" class="btn-slot-pill ${isProgress ? 'active-progress' : ''}" ${!editable ? 'disabled title="مقفلة - للعرض فقط"' : 'title="قيد العمل"'} onclick="setTaskShiftStatus('${escapeSingleQuotes(item.rawId)}', '${sh.id}', 'in_progress')">🔄 قيد العمل</button>
                         <button type="button" class="btn-slot-pill ${isCritical ? 'active-critical' : ''}" ${!editable ? 'disabled title="مقفلة - للعرض فقط"' : 'title="عطل طارئ"'} onclick="setTaskShiftStatus('${escapeSingleQuotes(item.rawId)}', '${sh.id}', 'critical')">🚨 عطل</button>
                       </div>
-                      <div id="evidence_slot_${encodeURIComponent(item.rawId)}_${sh.id}" style="margin-top: 4px; display: flex; align-items: center; gap: 4px;">
-                        ${shData.photoUrl ? `
-                          <button type="button" class="btn-evidence-badge" style="padding: 2px 6px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(item.rawId)}', '${sh.id}', 'task')" title="عرض صورة الإثبات">
-                            <img src="${shData.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
-                            <span>📸 إثبات</span>
-                          </button>
-                        ` : (editable ? `
-                          <button type="button" class="btn-add-evidence" style="padding: 2px 6px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${sh.id}', '${escapeSingleQuotes(item.ar || item.en)}')" title="التقاط صورة لإثبات الإنجاز">
-                            📷 إرفاق
-                          </button>
-                        ` : '')}
+                      <div id="evidence_slot_${encodeURIComponent(item.rawId)}_${sh.id}" style="margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                        ${(() => {
+                          const photos = getTaskPhotos(shData);
+                          if (photos.length > 0) {
+                            return `
+                              <div style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center;">
+                                ${photos.map((p, pIdx) => `
+                                  <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(item.rawId)}', '${sh.id}', 'task', null, '${p.id || ''}')" title="عرض صورة الإثبات (${pIdx + 1})">
+                                    <img src="${p.url}" class="evidence-thumb-preview" alt="معاينة ${pIdx + 1}">
+                                    <span>📸 ${photos.length > 1 ? `#${pIdx + 1}` : 'إثبات'}</span>
+                                  </button>
+                                `).join('')}
+                                ${editable ? `
+                                  <button type="button" class="btn-add-evidence" style="padding: 2px 6px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${sh.id}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="إضافة صورة إثبات أخرى لهذه المهمة">
+                                    + صورة
+                                  </button>
+                                ` : ''}
+                              </div>
+                            `;
+                          } else if (editable) {
+                            return `
+                              <button type="button" class="btn-add-evidence" style="padding: 2px 6px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${sh.id}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="التقاط صورة لإثبات الإنجاز">
+                                📷 إرفاق
+                              </button>
+                            `;
+                          }
+                          return '';
+                        })()}
                       </div>
                       ${(isCritical || shData.note) ? `
                         <input type="text" class="item-note-input" style="font-size: 11px; margin-top: 4px;" ${!editable ? 'readonly' : ''} placeholder="ملاحظة خاصة بالوردية..." value="${escapeHtml(shData.note || '')}" onchange="setTaskShiftNote('${escapeSingleQuotes(item.rawId)}', '${sh.id}', this.value)">
@@ -4114,16 +4450,33 @@
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                   <span>👤 ${lastUpdated}</span>
                   <span id="evidence_slot_${encodeURIComponent(item.rawId)}_${activeShiftView}">
-                    ${activeData.photoUrl ? `
-                      <button type="button" class="btn-evidence-badge" onclick="viewEvidencePhoto('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', 'task')" title="عرض صورة الإثبات">
-                        <img src="${activeData.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
-                        <span>📸 صورة التوثيق</span>
-                      </button>
-                    ` : (editable ? `
-                      <button type="button" class="btn-add-evidence" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', '${escapeSingleQuotes(item.ar || item.en)}')" title="التقاط صورة حية لإثبات إنجاز المهمة">
-                        📷 إرفاق صورة
-                      </button>
-                    ` : '')}
+                    ${(() => {
+                      const photos = getTaskPhotos(activeData);
+                      if (photos.length > 0) {
+                        return `
+                          <div style="display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                            ${photos.map((p, pIdx) => `
+                              <button type="button" class="btn-evidence-badge" onclick="viewEvidencePhoto('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', 'task', null, '${p.id || ''}')" title="عرض صورة الإثبات (${pIdx + 1})">
+                                <img src="${p.url}" class="evidence-thumb-preview" alt="معاينة ${pIdx + 1}">
+                                <span>📸 ${photos.length > 1 ? `صورة #${pIdx + 1}` : 'صورة التوثيق'}</span>
+                              </button>
+                            `).join('')}
+                            ${editable ? `
+                              <button type="button" class="btn-add-evidence" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="إضافة صورة أخرى للمهمة">
+                                ➕ إضافة صورة
+                              </button>
+                            ` : ''}
+                          </div>
+                        `;
+                      } else if (editable) {
+                        return `
+                          <button type="button" class="btn-add-evidence" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="التقاط صورة حية لإثبات إنجاز المهمة">
+                            📷 إرفاق صورة
+                          </button>
+                        `;
+                      }
+                      return '';
+                    })()}
                   </span>
                 </div>
                 ${activeData.status === 'critical' || activeData.note ? `
@@ -4198,17 +4551,34 @@
                       </div>
                       <span class="temp-shift-who" title="${escapeHtml(who)}">👤 ${escapeHtml(who)}</span>
                       ${isAlert ? '<span style="color: #dc2626; font-size: 10px; font-weight: 800;">⚠️ غير طبيعي!</span>' : ''}
-                      <div id="evidence_temp_slot_${encodeURIComponent(tName)}_${sh.id}" style="margin-top: 4px; display: flex; justify-content: center;">
-                        ${shTemp.photoUrl ? `
-                          <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(tName)}', '${sh.id}', 'temp')" title="عرض صورة عداد الثلاجة">
-                            <img src="${shTemp.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
-                            <span>📸 العداد</span>
-                          </button>
-                        ` : (editable ? `
-                          <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${sh.id}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="تصوير عداد الثلاجة للتوثيق">
-                            📷 العداد
-                          </button>
-                        ` : '')}
+                      <div id="evidence_temp_slot_${encodeURIComponent(tName)}_${sh.id}" style="margin-top: 4px; display: flex; justify-content: center; flex-wrap: wrap; gap: 4px;">
+                        ${(() => {
+                          const photos = getTaskPhotos(shTemp);
+                          if (photos.length > 0) {
+                            return `
+                              <div style="display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; align-items: center;">
+                                ${photos.map((p, pIdx) => `
+                                  <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(tName)}', '${sh.id}', 'temp', null, '${p.id || ''}')" title="عرض صورة عداد الثلاجة (${pIdx + 1})">
+                                    <img src="${p.url}" class="evidence-thumb-preview" alt="معاينة ${pIdx + 1}">
+                                    <span>📸 ${photos.length > 1 ? `#${pIdx + 1}` : 'العداد'}</span>
+                                  </button>
+                                `).join('')}
+                                ${editable ? `
+                                  <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${sh.id}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="إضافة صورة أخرى للعداد">
+                                    + عداد
+                                  </button>
+                                ` : ''}
+                              </div>
+                            `;
+                          } else if (editable) {
+                            return `
+                              <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${sh.id}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="تصوير عداد الثلاجة للتوثيق">
+                                📷 العداد
+                              </button>
+                            `;
+                          }
+                          return '';
+                        })()}
                       </div>
                     </div>
                   `;
