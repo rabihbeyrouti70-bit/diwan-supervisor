@@ -83,7 +83,7 @@
     }
   </script>
 
-  <link rel="stylesheet" href="assets/css/styles.css?v=1789238000">
+  <link rel="stylesheet" href="assets/css/styles.css?v=1789239000">
 </head>
 <body>
 
@@ -1406,8 +1406,8 @@
         </div>
       </div>
 
-      <div class="modal-footer" style="background: #1e293b; padding: 10px 16px; border-top: 1px solid #334155; display: flex; align-items: center; justify-content: space-between;">
-        <div id="evidenceModalActions" style="display: flex; gap: 8px;">
+      <div class="modal-footer" style="background: #1e293b; padding: 10px 16px; border-top: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+        <div id="evidenceModalActions" style="display: flex; gap: 8px; flex-wrap: wrap;">
           <!-- Retake or delete button if editable -->
         </div>
         <button type="button" class="btn btn-primary btn-sm" onclick="closeEvidencePhotoModal()" style="background: #3b82f6; border-color: #2563eb; font-weight: 700;">إغلاق المعاينة</button>
@@ -1417,7 +1417,7 @@
 
   <!-- EXECUTIVE PHOTO EVIDENCE GALLERY MODAL -->
   <div class="modal-overlay" id="evidenceGalleryModal" onclick="if(event.target === this) closeEvidenceGalleryModal()">
-    <div class="modal-card" style="max-width: 960px; max-height: 90vh; display: flex; flex-direction: column; background: #0f172a; color: white; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.6);">
+    <div class="modal-card" style="max-width: 960px; max-height: 90vh; padding: 0; overflow: hidden; display: flex; flex-direction: column; background: #0f172a; color: white; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.6);">
       <div class="modal-header" style="background: #1e293b; color: white; padding: 12px 18px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
         <div style="display: flex; align-items: center; gap: 10px;">
           <span style="font-size: 24px;">📸</span>
@@ -1454,7 +1454,7 @@
           ⏳ جاري تحميل صور التوثيق الميدانية...
         </div>
       </div>
-      <div class="modal-footer" style="background: #1e293b; padding: 10px 18px; border-top: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
+      <div class="modal-footer" style="background: #1e293b; padding: 10px 18px; border-top: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <span id="evidenceGallerySummaryText" style="font-size: 12px; color: #94a3b8;">إجمالي الصور المسجلة اليوم: 0</span>
         <button type="button" class="btn btn-outline-white btn-sm" onclick="closeEvidenceGalleryModal()">إغلاق المعرض</button>
       </div>
@@ -1500,6 +1500,6 @@
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789238500"></script>
+  <script src="assets/js/app.js?v=1789239000"></script>
 </body>
 </html>

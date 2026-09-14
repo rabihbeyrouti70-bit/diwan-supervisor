@@ -2929,5 +2929,33 @@
   display: flex !important;
 }
 
+@media (max-width: 640px) {
+  #evidencePhotoModal .modal-card,
+  #evidenceGalleryModal .modal-card {
+    width: 95% !important;
+    max-height: 94vh !important;
+    margin: 8px auto !important;
+  }
+
+  #evidencePhotoModal .modal-footer,
+  #evidenceGalleryModal .modal-footer {
+    padding: 8px 12px !important;
+  }
+
+  #evidenceModalActions {
+    width: 100%;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  #evidenceModalActions button {
+    flex: 1 1 auto;
+    text-align: center;
+    justify-content: center;
+  }
+}
+
+
 
 

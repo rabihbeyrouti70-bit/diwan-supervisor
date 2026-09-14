@@ -1939,6 +1939,33 @@
 
     // Physical keyboard listener
     window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const photoModal = document.getElementById('evidencePhotoModal');
+        if (photoModal && (photoModal.classList.contains('open') || photoModal.style.display === 'flex')) {
+          closeEvidencePhotoModal();
+          return;
+        }
+        const galleryModal = document.getElementById('evidenceGalleryModal');
+        if (galleryModal && (galleryModal.classList.contains('open') || galleryModal.style.display === 'flex')) {
+          closeEvidenceGalleryModal();
+          return;
+        }
+        const secModal = document.getElementById('securityAuditModal');
+        if (secModal && (secModal.classList.contains('open') || secModal.style.display === 'flex')) {
+          closeSecurityAuditModal();
+          return;
+        }
+        const openOverlays = document.querySelectorAll('.modal-overlay.open');
+        if (openOverlays && openOverlays.length > 0) {
+          openOverlays.forEach(ov => {
+            ov.classList.remove('open');
+            ov.style.display = 'none';
+          });
+          document.body.classList.remove('modal-open');
+          return;
+        }
+      }
+
       if (document.body.classList.contains('auth-passed')) return;
       const overlay = document.getElementById('authOverlay');
       if (!overlay || overlay.classList.contains('unlocked')) return;
@@ -3534,41 +3561,7 @@
     }
 
     function deleteEvidencePhoto(rawId, shiftId, type = 'task', photoId = null) {
-      if (!canEditShift(shiftId) && currentUserRole !== 'admin') {
-        alert('عذراً، لا يمكنك حذف الصورة لأنها خارج صلاحية ورديتك.');
-        return;
-      }
-
-      if (!confirm('هل أنت متأكد من حذف صورة التوثيق؟ يمكنك التقاط صورة بديلة بعدها.')) return;
-
-      closeEvidencePhotoModal();
-
-      const container = (type === 'temp') ? state.temperatures : state.items;
-      if (container && container[rawId] && container[rawId][shiftId]) {
-        const slot = container[rawId][shiftId];
-        if (Array.isArray(slot.photos) && photoId) {
-          slot.photos = slot.photos.filter(p => p.id !== photoId);
-          if (slot.photos.length > 0) {
-            slot.photoUrl = slot.photos[slot.photos.length - 1].url;
-            slot.photoBy = slot.photos[slot.photos.length - 1].by;
-            slot.photoTime = slot.photos[slot.photos.length - 1].time;
-          } else {
-            delete slot.photos;
-            delete slot.photoUrl;
-            delete slot.photoBy;
-            delete slot.photoTime;
-          }
-        } else {
-          delete slot.photos;
-          delete slot.photoUrl;
-          delete slot.photoBy;
-          delete slot.photoTime;
-        }
-      }
-
-      saveState();
-      renderSections();
-      showToast('🗑️ تم حذف صورة التوثيق.');
+      return deleteEvidencePhotoFromCloud(currentBranchId, rawId, shiftId, photoId, type);
     }
 
     async function deleteEvidencePhotoFromCloud(branchId, rawId, shiftId, photoId = null, type = 'task') {
@@ -3586,12 +3579,15 @@
 
       closeEvidencePhotoModal();
 
+      const cleanRawId = decodeFirebaseKey(rawId);
+
       try {
         // 1. If targeting current active branch, update local state first
         if (branchId === currentBranchId) {
           const container = (type === 'temp') ? state.temperatures : state.items;
-          if (container && container[rawId] && container[rawId][shiftId]) {
-            const slot = container[rawId][shiftId];
+          const slotKey = container ? (container[cleanRawId] ? cleanRawId : (container[rawId] ? rawId : encodeFirebaseKey(cleanRawId))) : null;
+          if (container && slotKey && container[slotKey] && container[slotKey][shiftId]) {
+            const slot = container[slotKey][shiftId];
             if (Array.isArray(slot.photos) && photoId) {
               slot.photos = slot.photos.filter(p => p.id !== photoId);
               if (slot.photos.length > 0) {
@@ -3618,11 +3614,23 @@
         // 2. Direct Cloud Deletion on Firebase RTDB (works for any branch)
         if (firebaseDb) {
           const nodeType = (type === 'temp') ? 'temperatures' : 'items';
-          const path = `branches/${branchId}/daily_ops/${currentDate}/${nodeType}/${encodeFirebaseKey(rawId)}/${shiftId}`;
-          const ref = firebaseDb.ref(path);
+          const encodedKey = encodeFirebaseKey(cleanRawId);
+          const path = `branches/${branchId}/daily_ops/${currentDate}/${nodeType}/${encodedKey}/${shiftId}`;
+          let targetRef = firebaseDb.ref(path);
 
-          const snapshot = await ref.once('value');
-          const slotVal = snapshot.val();
+          let snapshot = await targetRef.once('value');
+          let slotVal = snapshot.val();
+
+          // Fallback check if stored under rawId if encodedKey differs
+          if (!slotVal && rawId && rawId !== encodedKey) {
+            const fbRef = firebaseDb.ref(`branches/${branchId}/daily_ops/${currentDate}/${nodeType}/${rawId}/${shiftId}`);
+            const fbSnap = await fbRef.once('value');
+            if (fbSnap.val()) {
+              slotVal = fbSnap.val();
+              targetRef = fbRef;
+            }
+          }
+
           if (slotVal) {
             let photos = Array.isArray(slotVal.photos) ? slotVal.photos : [];
             if (photos.length === 0 && slotVal.photoUrl) {
@@ -3636,14 +3644,14 @@
             }
 
             if (photos.length > 0) {
-              await ref.update({
+              await targetRef.update({
                 photos: photos,
                 photoUrl: photos[photos.length - 1].url || null,
                 photoBy: photos[photos.length - 1].by || null,
                 photoTime: photos[photos.length - 1].time || null
               });
             } else {
-              await ref.update({
+              await targetRef.update({
                 photos: null,
                 photoUrl: null,
                 photoBy: null,
@@ -3655,7 +3663,7 @@
 
         // 3. Update in-memory hqTodayPhotos
         hqTodayPhotos = hqTodayPhotos.filter(p => {
-          if (p.branchId === branchId && p.rawId === rawId && p.shiftId === shiftId) {
+          if (p.branchId === branchId && (p.rawId === cleanRawId || p.rawId === rawId) && p.shiftId === shiftId) {
             if (photoId && p.photoId) {
               return p.photoId !== photoId;
             }
@@ -3915,7 +3923,7 @@
       const timeStr = meta.time || 'غير محدد';
 
       metaBox.innerHTML = `
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;">
           <div>🏢 <strong>الفرع:</strong> ${escapeHtml(branchName)}</div>
           <div>👤 <strong>المشرف:</strong> ${escapeHtml(supervisorName)}</div>
           <div>🕒 <strong>التوقيت:</strong> ${escapeHtml(timeStr)}</div>
@@ -4253,7 +4261,7 @@
       }
 
       container.innerHTML = `
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px;">
           ${list.map(p => {
             const shIcon = p.shiftId === 'morning' ? '☀️' : (p.shiftId === 'evening' ? '🌆' : '🌙');
             return `
@@ -5395,7 +5403,7 @@
     }
 
     function escapeSingleQuotes(str) {
-      return (str || '').replace(/'/g, "\\'");
+      return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ').replace(/\r/g, '');
     }
 
     /* ============================================================
