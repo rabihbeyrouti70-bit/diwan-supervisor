@@ -1181,9 +1181,15 @@
       }
 
       // 3. Shared between General Manager AND Branch Manager (admin + branch_manager)
+      const btnEvidenceGal = document.getElementById('btnHqEvidenceGallery');
+      setElementRoleVisibility(btnEvidenceGal, isAnyManager, 'inline-flex');
       setElementRoleVisibility(btnManage, isAnyManager, 'inline-flex');
       setElementRoleVisibility(btnShifts, isAnyManager, 'inline-flex');
       setElementRoleVisibility(btnDirHead, isAnyManager, 'inline-flex');
+
+      if (isGeneralManager && typeof listenToHqEvidenceFeed === 'function') {
+        listenToHqEvidenceFeed();
+      }
 
       // 4. Live Presence Strip
       if (!isAnyManager && presStrip) {
@@ -2142,7 +2148,12 @@
 
           // Load shift state for this branch & render
           loadStateForCurrentShift();
-          if (firebaseDb) listenToFirebaseShift();
+          if (firebaseDb) {
+            listenToFirebaseShift();
+            if (currentUserRole === 'admin' && typeof listenToHqEvidenceFeed === 'function') {
+              listenToHqEvidenceFeed();
+            }
+          }
           renderAll();
           if (typeof updateManagerLivePresenceStrip === 'function') {
             updateManagerLivePresenceStrip();
@@ -3078,6 +3089,9 @@
         listenToFirebaseTempRanges();
         listenToFirebaseBranches();
         listenToBranchDirectives();
+        if (currentUserRole === 'admin' && typeof listenToHqEvidenceFeed === 'function') {
+          listenToHqEvidenceFeed();
+        }
         initFirebaseMessaging();
         initDeviceActivationsTracker();
         setSyncBadgeStatus('cloud');
@@ -3492,6 +3506,50 @@
       showToast('🗑️ تم حذف صورة التوثيق.');
     }
 
+    function viewEvidencePhoto(rawId, shiftId, type = 'task', targetBranchId = null) {
+      const bId = targetBranchId || currentBranchId;
+      let photoData = null;
+      let taskTitle = '';
+
+      if (bId === currentBranchId) {
+        if (type === 'temp') {
+          photoData = (state.temperatures && state.temperatures[rawId]) ? state.temperatures[rawId][shiftId] : null;
+          const conf = (typeof getBranchTempRanges === 'function' ? getBranchTempRanges(currentBranchId) : {})[rawId] || {};
+          taskTitle = 'قراءة عداد ثلاجة: ' + (conf.ar || rawId);
+        } else {
+          photoData = (state.items && state.items[rawId]) ? state.items[rawId][shiftId] : null;
+          taskTitle = rawId;
+        }
+      }
+
+      if (!photoData || !photoData.photoUrl) {
+        // Fallback: look up in hqTodayPhotos
+        const match = (hqTodayPhotos || []).find(p => p.branchId === bId && p.rawId === rawId && p.shiftId === shiftId && (type ? p.type === type : true));
+        if (match && match.photoUrl) {
+          openEvidencePhotoModal(match.photoUrl, match.title || taskTitle || rawId, {
+            rawId: match.rawId,
+            shiftId: match.shiftId,
+            branchId: match.branchId,
+            type: match.type,
+            supervisor: match.supervisor,
+            time: match.time
+          });
+          return;
+        }
+        alert('لا توجد صورة إثبات مسجلة لهذا البند.');
+        return;
+      }
+
+      openEvidencePhotoModal(photoData.photoUrl, taskTitle, {
+        rawId: rawId,
+        shiftId: shiftId,
+        type: type,
+        branchId: bId,
+        supervisor: photoData.photoBy || photoData.updatedBy || '',
+        time: photoData.photoTime || photoData.updatedAt || ''
+      });
+    }
+
     function openEvidencePhotoModal(photoUrl, taskTitle, meta = {}) {
       const modal = document.getElementById('evidencePhotoModal');
       const img = document.getElementById('evidenceModalImage');
@@ -3555,6 +3613,282 @@
       if (img) img.src = '';
     }
 
+    /* ============================================================
+       EXECUTIVE MULTI-BRANCH PHOTO EVIDENCE STREAM & GALLERY
+       ============================================================ */
+    let hqTodayPhotos = [];
+    let hqEvidenceFeedListeners = [];
+    let hqEvidenceKnownIds = new Set();
+    let isHqEvidenceInitialLoad = true;
+
+    function listenToHqEvidenceFeed() {
+      if (!firebaseDb) return;
+      if (currentUserRole !== 'admin') return;
+
+      // Clean prior listeners
+      if (hqEvidenceFeedListeners && hqEvidenceFeedListeners.length > 0) {
+        hqEvidenceFeedListeners.forEach(l => {
+          try { l.ref.off('value', l.callback); } catch (e) {}
+        });
+        hqEvidenceFeedListeners = [];
+      }
+
+      const branches = getBranchesList();
+      branches.forEach(b => {
+        const path = 'branches/' + b.id + '/daily_ops/' + currentDate;
+        const ref = firebaseDb.ref(path);
+        const callback = ref.on('value', (snapshot) => {
+          const rawVal = snapshot.val();
+          const cloudVal = (rawVal && typeof deserializeStateFromFirebase === 'function')
+            ? deserializeStateFromFirebase(rawVal)
+            : rawVal;
+
+          processBranchEvidenceUpdates(b.id, cloudVal);
+        }, (err) => {
+          console.warn('HQ Evidence listener error for', b.id, err);
+        });
+
+        hqEvidenceFeedListeners.push({ ref, callback });
+      });
+
+      // After 3 seconds, mark initial load as complete so subsequent photos trigger toast
+      setTimeout(() => {
+        isHqEvidenceInitialLoad = false;
+      }, 3000);
+    }
+
+    function processBranchEvidenceUpdates(branchId, branchState) {
+      if (!branchState) {
+        hqTodayPhotos = hqTodayPhotos.filter(p => p.branchId !== branchId);
+        updateEvidenceCounters();
+        return;
+      }
+
+      const bObj = getBranchById(branchId);
+      const bName = bObj ? bObj.nameAr : branchId;
+      const updatedPhotos = [];
+
+      // Check items
+      if (branchState.items && typeof branchState.items === 'object') {
+        Object.keys(branchState.items).forEach(rawId => {
+          const itShifts = branchState.items[rawId];
+          if (itShifts && typeof itShifts === 'object') {
+            Object.keys(itShifts).forEach(shId => {
+              const shData = itShifts[shId];
+              if (shData && shData.photoUrl) {
+                const uniqueId = `${branchId}_task_${rawId}_${shId}`;
+                const photoObj = {
+                  id: uniqueId,
+                  branchId: branchId,
+                  branchName: bName,
+                  type: 'task',
+                  rawId: rawId,
+                  title: rawId,
+                  shiftId: shId,
+                  shiftName: getShiftName(branchId, shId),
+                  supervisor: shData.photoBy || shData.updatedBy || 'مشرف الصالة',
+                  time: shData.photoTime || shData.updatedAt || '',
+                  photoUrl: shData.photoUrl
+                };
+                updatedPhotos.push(photoObj);
+
+                // Notify manager if this is a newly arrived photo
+                if (!isHqEvidenceInitialLoad && !hqEvidenceKnownIds.has(uniqueId) && currentUserRole === 'admin') {
+                  showToast(`📸 إثبات جديد بالصورة: [${bName} - ${photoObj.supervisor} - ${rawId}]`);
+                }
+                hqEvidenceKnownIds.add(uniqueId);
+              }
+            });
+          }
+        });
+      }
+
+      // Check temperatures
+      if (branchState.temperatures && typeof branchState.temperatures === 'object') {
+        const ranges = (typeof getBranchTempRanges === 'function') ? getBranchTempRanges(branchId) : {};
+        Object.keys(branchState.temperatures).forEach(tName => {
+          const tShifts = branchState.temperatures[tName];
+          if (tShifts && typeof tShifts === 'object') {
+            Object.keys(tShifts).forEach(shId => {
+              const shData = tShifts[shId];
+              if (shData && shData.photoUrl) {
+                const uniqueId = `${branchId}_temp_${tName}_${shId}`;
+                const tTitle = 'قراءة ثلاجة: ' + ((ranges[tName] && ranges[tName].ar) || tName);
+                const photoObj = {
+                  id: uniqueId,
+                  branchId: branchId,
+                  branchName: bName,
+                  type: 'temp',
+                  rawId: tName,
+                  title: tTitle,
+                  shiftId: shId,
+                  shiftName: getShiftName(branchId, shId),
+                  supervisor: shData.photoBy || shData.updatedBy || 'مشرف الصالة',
+                  time: shData.photoTime || shData.updatedAt || '',
+                  photoUrl: shData.photoUrl
+                };
+                updatedPhotos.push(photoObj);
+
+                if (!isHqEvidenceInitialLoad && !hqEvidenceKnownIds.has(uniqueId) && currentUserRole === 'admin') {
+                  showToast(`📸 توثيق عداد ثلاجة: [${bName} - ${photoObj.supervisor} - ${tTitle}]`);
+                }
+                hqEvidenceKnownIds.add(uniqueId);
+              }
+            });
+          }
+        });
+      }
+
+      // Replace this branch's entries in hqTodayPhotos
+      hqTodayPhotos = hqTodayPhotos.filter(p => p.branchId !== branchId).concat(updatedPhotos);
+
+      updateEvidenceCounters();
+
+      // If gallery modal is currently open, re-render it
+      const modal = document.getElementById('evidenceGalleryModal');
+      if (modal && modal.style.display === 'flex') {
+        renderEvidenceGallery();
+      }
+    }
+
+    function updateEvidenceCounters() {
+      const badge = document.getElementById('hqEvidenceCountBadge');
+      const totalCount = hqTodayPhotos.length;
+      if (badge) {
+        badge.innerText = totalCount;
+        if (totalCount > 0) {
+          badge.style.background = '#22c55e';
+          badge.style.color = '#ffffff';
+        } else {
+          badge.style.background = '#e0f2fe';
+          badge.style.color = '#0369a1';
+        }
+      }
+
+      // Update header branch select labels with photo count
+      const headerSelect = document.getElementById('headerBranchSelect');
+      if (headerSelect && currentUserRole === 'admin') {
+        const branches = getBranchesList();
+        const currentVal = headerSelect.value || currentBranchId;
+        headerSelect.innerHTML = branches.map(b => {
+          const count = hqTodayPhotos.filter(p => p.branchId === b.id).length;
+          const photoIndicator = count > 0 ? ` 📸 (${count})` : '';
+          return `<option value="${b.id}">${b.nameAr}${photoIndicator}</option>`;
+        }).join('');
+        headerSelect.value = currentVal;
+      }
+    }
+
+    function openEvidenceGalleryModal() {
+      const modal = document.getElementById('evidenceGalleryModal');
+      if (!modal) return;
+
+      const branchFilter = document.getElementById('evidenceGalleryBranchFilter');
+      if (branchFilter) {
+        const branches = getBranchesList();
+        const currentSelected = branchFilter.value || (currentUserRole === 'branch_manager' ? currentBranchId : 'all');
+        branchFilter.innerHTML = (currentUserRole === 'admin' ? '<option value="all">كافة الفروع (المشهد العام الكامل)</option>' : '') +
+          branches.map(b => {
+            const count = hqTodayPhotos.filter(p => p.branchId === b.id).length;
+            const star = count > 0 ? ` [📸 ${count}]` : '';
+            return `<option value="${b.id}">${b.nameAr}${star}</option>`;
+          }).join('');
+        branchFilter.value = currentSelected;
+      }
+
+      renderEvidenceGallery();
+      modal.style.display = 'flex';
+      document.body.classList.add('modal-open');
+    }
+
+    function closeEvidenceGalleryModal() {
+      const modal = document.getElementById('evidenceGalleryModal');
+      if (modal) modal.style.display = 'none';
+      document.body.classList.remove('modal-open');
+    }
+
+    function refreshEvidenceGallery(manual = false) {
+      if (manual && typeof listenToHqEvidenceFeed === 'function') {
+        listenToHqEvidenceFeed();
+        showToast("🔄 تم تحديث صور التوثيق سحابياً");
+      }
+      renderEvidenceGallery();
+    }
+
+    function renderEvidenceGallery() {
+      const container = document.getElementById('evidenceGalleryBody');
+      const summaryEl = document.getElementById('evidenceGallerySummaryText');
+      if (!container) return;
+
+      const branchFilter = document.getElementById('evidenceGalleryBranchFilter');
+      const shiftFilter = document.getElementById('evidenceGalleryShiftFilter');
+      const selectedBranch = branchFilter ? branchFilter.value : 'all';
+      const selectedShift = shiftFilter ? shiftFilter.value : 'all';
+
+      let list = hqTodayPhotos.slice();
+      if (selectedBranch && selectedBranch !== 'all') {
+        list = list.filter(p => p.branchId === selectedBranch);
+      }
+      if (selectedShift && selectedShift !== 'all') {
+        list = list.filter(p => p.shiftId === selectedShift);
+      }
+
+      if (summaryEl) {
+        summaryEl.innerText = `المعروض: ${list.length} من إجمالي ${hqTodayPhotos.length} صورة مسجلة اليوم`;
+      }
+
+      if (list.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 50px 20px; color: #94a3b8;">
+            <div style="font-size: 48px; margin-bottom: 12px; opacity: 0.7;">📷</div>
+            <h4 style="font-size: 16px; font-weight: 800; color: #f8fafc; margin-bottom: 6px;">لا توجد صور توثيق مسجلة لهذا الاختيار</h4>
+            <p style="font-size: 12.5px; max-width: 420px; margin: 0 auto; line-height: 1.6;">
+              ${selectedBranch !== 'all' ? 'لم يقم مشرف هذا الفرع برفع صور إثبات بعد.' : 'لم يتم التقاط صور إثبات في الفروع حتى اللحظة. عندما يلتقط أي مشرف صورة ستظهر هنا فوراً تلقائياً.'}
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = `
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
+          ${list.map(p => {
+            const shIcon = p.shiftId === 'morning' ? '☀️' : (p.shiftId === 'evening' ? '🌆' : '🌙');
+            return `
+              <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
+                <div style="padding: 10px 12px; background: #0f172a; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 12px; font-weight: 800; color: #60a5fa;">🏢 ${escapeHtml(p.branchName)}</span>
+                  <span style="font-size: 11px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${shIcon} ${escapeHtml(p.shiftName)}</span>
+                </div>
+                <div style="position: relative; height: 180px; background: #020617; cursor: pointer; display: flex; align-items: center; justify-content: center; overflow: hidden;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(p.photoUrl)}', '${escapeSingleQuotes(p.title)}', { rawId: '${escapeSingleQuotes(p.rawId)}', shiftId: '${p.shiftId}', branchId: '${p.branchId}', type: '${p.type}', supervisor: '${escapeSingleQuotes(p.supervisor)}', time: '${escapeSingleQuotes(p.time)}' })">
+                  <img src="${p.photoUrl}" alt="إثبات" style="width: 100%; height: 100%; object-fit: cover;">
+                  <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.25); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;" onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='0'">
+                    <span style="background: rgba(0,0,0,0.75); color: white; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 700;">🔍 تكبير الصورة</span>
+                  </div>
+                </div>
+                <div style="padding: 12px; flex: 1; display: flex; flex-direction: column; justify-content: space-between;">
+                  <div>
+                    <h5 style="font-size: 13px; font-weight: 800; color: #f8fafc; margin: 0 0 6px 0; line-height: 1.4;">📋 ${escapeHtml(p.title)}</h5>
+                    <div style="font-size: 11.5px; color: #94a3b8; line-height: 1.6;">
+                      <div>👤 <strong>المشرف:</strong> ${escapeHtml(p.supervisor)}</div>
+                      <div>🕒 <strong>التوقيت:</strong> ${escapeHtml(p.time)}</div>
+                    </div>
+                  </div>
+                  <div style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-sm btn-primary" style="flex: 1; font-size: 11px; padding: 4px 8px; justify-content: center; background: #0284c7; border-color: #0369a1;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(p.photoUrl)}', '${escapeSingleQuotes(p.title)}', { rawId: '${escapeSingleQuotes(p.rawId)}', shiftId: '${p.shiftId}', branchId: '${p.branchId}', type: '${p.type}', supervisor: '${escapeSingleQuotes(p.supervisor)}', time: '${escapeSingleQuotes(p.time)}' })">🔍 تكبير</button>
+                    <a href="${p.photoUrl}" target="_blank" download="evidence_${p.branchId}_${p.shiftId}.jpg" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; text-decoration: none; display: inline-flex; align-items: center;" title="تحميل الأصل">⬇️</a>
+                    ${currentUserRole === 'admin' ? `
+                      <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; color: #38bdf8; border-color: #0284c7;" onclick="closeEvidenceGalleryModal(); onAdminSwitchBranch('${p.branchId}');" title="الانتقال إلى ورقة هذا الفرع">🏢 انتقل للفرع</button>
+                    ` : ''}
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
     function setEvidenceUploadingState(rawId, shiftId, isUploading) {
       const el = document.getElementById(`evidence_slot_${encodeURIComponent(rawId)}_${shiftId}`);
       if (!el) return;
@@ -3611,6 +3945,23 @@
 
         const isExpanded = expandedSections.has(sec.id);
 
+        // Calculate photo evidence in this section
+        let secPhotoCount = 0;
+        sec.items.forEach(it => {
+          const itemEntry = state.items[it.rawId] || {};
+          Object.values(itemEntry).forEach(shObj => {
+            if (shObj && shObj.photoUrl) secPhotoCount++;
+          });
+        });
+        if (sec.temps) {
+          sec.temps.forEach(tName => {
+            const tEntry = (state.temperatures && state.temperatures[tName]) || {};
+            Object.values(tEntry).forEach(shObj => {
+              if (shObj && shObj.photoUrl) secPhotoCount++;
+            });
+          });
+        }
+
         // Section Header with Accordion Toggle (Collapsed by default - مضبوبة افتراضياً)
         const header = document.createElement('div');
         header.className = 'section-header' + (isExpanded ? ' active' : ' is-collapsed');
@@ -3623,6 +3974,11 @@
             </div>
           </div>
           <div class="section-meta">
+            ${secPhotoCount > 0 ? `
+              <span class="section-photo-badge" style="background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;" title="يوجد توثيق بالصور في هذا القسم">
+                📸 ${secPhotoCount} صورة إثبات
+              </span>
+            ` : ''}
             <span class="section-badge ${isFullyDone ? 'completed' : ''}">
               ${secDone} / ${sec.items.length} ${isFullyDone ? 'مكتمل ✅' : ''}
             </span>
@@ -3692,7 +4048,7 @@
                       </div>
                       <div id="evidence_slot_${encodeURIComponent(item.rawId)}_${sh.id}" style="margin-top: 4px; display: flex; align-items: center; gap: 4px;">
                         ${shData.photoUrl ? `
-                          <button type="button" class="btn-evidence-badge" style="padding: 2px 6px; font-size: 10px;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(shData.photoUrl)}', '${escapeSingleQuotes(item.ar || item.en)}', { rawId: '${escapeSingleQuotes(item.rawId)}', shiftId: '${sh.id}', branchId: currentBranchId, supervisor: '${escapeSingleQuotes(shData.photoBy || shData.updatedBy || '')}', time: '${escapeSingleQuotes(shData.photoTime || shData.updatedAt || '')}' })" title="عرض صورة الإثبات">
+                          <button type="button" class="btn-evidence-badge" style="padding: 2px 6px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(item.rawId)}', '${sh.id}', 'task')" title="عرض صورة الإثبات">
                             <img src="${shData.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
                             <span>📸 إثبات</span>
                           </button>
@@ -3759,7 +4115,7 @@
                   <span>👤 ${lastUpdated}</span>
                   <span id="evidence_slot_${encodeURIComponent(item.rawId)}_${activeShiftView}">
                     ${activeData.photoUrl ? `
-                      <button type="button" class="btn-evidence-badge" onclick="openEvidencePhotoModal('${escapeSingleQuotes(activeData.photoUrl)}', '${escapeSingleQuotes(item.ar || item.en)}', { rawId: '${escapeSingleQuotes(item.rawId)}', shiftId: '${activeShiftView}', branchId: currentBranchId, supervisor: '${escapeSingleQuotes(activeData.photoBy || activeData.updatedBy || '')}', time: '${escapeSingleQuotes(activeData.photoTime || activeData.updatedAt || '')}' })" title="عرض صورة الإثبات">
+                      <button type="button" class="btn-evidence-badge" onclick="viewEvidencePhoto('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', 'task')" title="عرض صورة الإثبات">
                         <img src="${activeData.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
                         <span>📸 صورة التوثيق</span>
                       </button>
@@ -3844,7 +4200,7 @@
                       ${isAlert ? '<span style="color: #dc2626; font-size: 10px; font-weight: 800;">⚠️ غير طبيعي!</span>' : ''}
                       <div id="evidence_temp_slot_${encodeURIComponent(tName)}_${sh.id}" style="margin-top: 4px; display: flex; justify-content: center;">
                         ${shTemp.photoUrl ? `
-                          <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(shTemp.photoUrl)}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', { rawId: '${escapeSingleQuotes(tName)}', shiftId: '${sh.id}', type: 'temp', branchId: currentBranchId, supervisor: '${escapeSingleQuotes(shTemp.photoBy || shTemp.updatedBy || '')}', time: '${escapeSingleQuotes(shTemp.photoTime || shTemp.updatedAt || '')}' })" title="عرض صورة عداد الثلاجة">
+                          <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(tName)}', '${sh.id}', 'temp')" title="عرض صورة عداد الثلاجة">
                             <img src="${shTemp.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
                             <span>📸 العداد</span>
                           </button>
@@ -6139,6 +6495,8 @@
 
     function renderHqBranchCardHtml(b, s, isCurrent, isCloud, hasData) {
       const pct = s.percentage;
+      const bPhotos = (hqTodayPhotos || []).filter(p => p.branchId === b.id);
+      const photoCount = bPhotos.length;
       return `
         <div id="hqCard_${b.id}" style="background: white; border: 2px solid ${isCurrent ? 'var(--primary)' : 'var(--border)'}; border-radius: 12px; padding: 14px; position: relative; box-shadow: var(--shadow-sm);">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
@@ -6159,15 +6517,23 @@
             </div>
           </div>
 
-          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; display: flex; justify-content: space-between;">
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
             <span>✅ ${s.done} مكتمل</span>
             <span>🔄 ${s.inProgress} قيد العمل</span>
             <span style="color: ${s.critical > 0 ? '#ef4444' : 'inherit'}; font-weight: ${s.critical > 0 ? '800' : 'normal'};">🚨 ${s.critical} عطل</span>
+            ${photoCount > 0 ? `
+              <span style="background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; padding: 1px 6px; border-radius: 999px; font-weight: 800; font-size: 11px;">📸 ${photoCount} إثبات</span>
+            ` : ''}
           </div>
 
-          <button type="button" class="btn btn-outline-white btn-sm" style="width: 100%; justify-content: center; font-weight: 800; ${isCurrent ? 'opacity: 0.5; pointer-events: none;' : 'color: var(--primary-dark); border-color: var(--primary);'}" onclick="onAdminSwitchBranch('${b.id}'); closeHqOverviewModal();">
-            ${isCurrent ? 'أنت تتصفح هذا الفرع الآن' : 'الانتقال ومتابعة هذا الفرع ➔'}
-          </button>
+          <div style="display: flex; gap: 6px;">
+            <button type="button" class="btn btn-outline-white btn-sm" style="flex: 1; justify-content: center; font-weight: 800; ${isCurrent ? 'opacity: 0.5; pointer-events: none;' : 'color: var(--primary-dark); border-color: var(--primary);'}" onclick="onAdminSwitchBranch('${b.id}'); closeHqOverviewModal();">
+              ${isCurrent ? 'أنت تتصفح هذا الفرع الآن' : 'الانتقال ومتابعة هذا الفرع ➔'}
+            </button>
+            ${photoCount > 0 ? `
+              <button type="button" class="btn btn-sm btn-primary" style="font-size: 11px; padding: 4px 8px; background: #0284c7; border-color: #0369a1;" onclick="closeHqOverviewModal(); openEvidenceGalleryModal(); document.getElementById('evidenceGalleryBranchFilter').value='${b.id}'; renderEvidenceGallery();" title="عرض صور إثبات هذا الفرع">📸 الصور (${photoCount})</button>
+            ` : ''}
+          </div>
         </div>
       `;
     }

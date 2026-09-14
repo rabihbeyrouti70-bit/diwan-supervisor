@@ -202,6 +202,10 @@
             🏢 <span class="btn-full-text">ملخص الفروع</span><span class="btn-mobile-text" style="display: none;">الملخص</span>
           </button>
 
+          <button id="btnHqEvidenceGallery" class="btn btn-sm role-hidden" data-role-hidden="true" onclick="openEvidenceGalleryModal()" style="display: none; background: #0284c7; color: white; border: 1px solid #0369a1; font-weight: 800; align-items: center; gap: 4px;" title="معرض صور التوثيق الميداني لكافة الفروع">
+            📸 <span class="btn-full-text">معرض الصور</span><span class="btn-mobile-text" style="display: none;">الصور</span><span id="hqEvidenceCountBadge" style="background: #e0f2fe; color: #0369a1; padding: 1px 6px; border-radius: 999px; font-size: 11px; margin-inline-start: 4px; font-weight: 900;">0</span>
+          </button>
+
           <button id="btnManageSupervisors" class="btn btn-primary btn-sm role-hidden" data-role-hidden="true" onclick="openSupervisorsModal()" style="display: none; background: #2563eb; border-color: #1d4ed8;" title="إدارة مسؤولي الصالة (صلاحية الإدارة فقط)">
             👥 <span class="btn-full-text">إدارة المشرفين</span><span class="btn-mobile-text" style="display: none;">المشرفين</span>
           </button>
@@ -1411,6 +1415,49 @@
     </div>
   </div>
 
+  <!-- EXECUTIVE PHOTO EVIDENCE GALLERY MODAL -->
+  <div class="modal-overlay" id="evidenceGalleryModal" style="display: none; z-index: 100040;" onclick="if(event.target === this) closeEvidenceGalleryModal()">
+    <div class="modal-card" style="max-width: 960px; max-height: 90vh; display: flex; flex-direction: column; background: #0f172a; color: white; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.6);">
+      <div class="modal-header" style="background: #1e293b; color: white; padding: 12px 18px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 24px;">📸</span>
+          <div>
+            <h3 style="font-size: 16px; font-weight: 800; margin: 0; color: #f8fafc;">معرض صور التوثيق الميداني (Live Proof-of-Work)</h3>
+            <span style="font-size: 11.5px; color: #94a3b8;">رصد حي وفوري للصور والشهادات الميدانية لكافة فروع ديوان ماركت</span>
+          </div>
+        </div>
+        <button type="button" class="btn-close" style="color: #94a3b8; font-size: 20px; background: transparent; border: none; cursor: pointer;" onclick="closeEvidenceGalleryModal()">✕</button>
+      </div>
+      <div style="background: #1e293b; padding: 10px 18px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="evidenceGalleryBranchFilter" style="font-size: 12px; color: #cbd5e1; font-weight: 700;">🏢 الفرع:</label>
+          <select id="evidenceGalleryBranchFilter" class="form-control" style="font-size: 12px; padding: 4px 8px; width: auto; background: #0f172a; color: white; border: 1px solid #475569;" onchange="renderEvidenceGallery()">
+            <option value="all">كافة الفروع (المشهد العام)</option>
+          </select>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="evidenceGalleryShiftFilter" style="font-size: 12px; color: #cbd5e1; font-weight: 700;">🕒 الوردية:</label>
+          <select id="evidenceGalleryShiftFilter" class="form-control" style="font-size: 12px; padding: 4px 8px; width: auto; background: #0f172a; color: white; border: 1px solid #475569;" onchange="renderEvidenceGallery()">
+            <option value="all">كافة الورديات</option>
+            <option value="morning">☀️ صباحي</option>
+            <option value="evening">🌆 مسائي</option>
+            <option value="night">🌙 ليلي</option>
+          </select>
+          <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px;" onclick="refreshEvidenceGallery(true)">🔄 تحديث</button>
+        </div>
+      </div>
+      <div class="modal-body" id="evidenceGalleryBody" style="overflow-y: auto; padding: 16px; flex: 1;">
+        <div style="text-align: center; padding: 40px; color: #94a3b8; font-size: 13px;">
+          ⏳ جاري تحميل صور التوثيق الميدانية...
+        </div>
+      </div>
+      <div class="modal-footer" style="background: #1e293b; padding: 10px 18px; border-top: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
+        <span id="evidenceGallerySummaryText" style="font-size: 12px; color: #94a3b8;">إجمالي الصور المسجلة اليوم: 0</span>
+        <button type="button" class="btn btn-outline-white btn-sm" onclick="closeEvidenceGalleryModal()">إغلاق المعرض</button>
+      </div>
+    </div>
+  </div>
+
   <!-- SECURITY AUDIT LOGS MODAL -->
   <div class="modal-overlay" id="securityAuditModal">
     <div class="modal-card modal-lg" style="max-width: 750px; max-height: 90vh; display: flex; flex-direction: column;">
@@ -1450,6 +1497,6 @@
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789235000"></script>
+  <script src="assets/js/app.js?v=1789236000"></script>
 </body>
 </html>
