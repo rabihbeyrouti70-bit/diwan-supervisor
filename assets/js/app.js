@@ -3790,16 +3790,19 @@
 
       if (bId === currentBranchId) {
         const container = (type === 'temp') ? state.temperatures : state.items;
-        const slot = (container && container[rawId]) ? container[rawId][shiftId] : null;
-        if (slot) {
-          const photos = getTaskPhotos(slot);
+        // Resilient slot lookup: try direct, encoded, and decoded keys
+        const slot = container ? (container[rawId] || container[encodeFirebaseKey(rawId)] || container[decodeFirebaseKey(rawId)]) : null;
+        const targetSlot = (slot && slot[shiftId]) ? slot[shiftId] : null;
+
+        if (targetSlot) {
+          const photos = getTaskPhotos(targetSlot);
           if (photos.length > 0) {
             const matched = targetPhotoId ? photos.find(p => p.id === targetPhotoId) : photos[photos.length - 1];
             const pObj = matched || photos[0];
             selectedPhotoUrl = pObj.url;
             resolvedPhotoId = pObj.id;
-            supervisor = pObj.by || slot.photoBy || slot.updatedBy || '';
-            timeStr = pObj.time || slot.photoTime || slot.updatedAt || '';
+            supervisor = pObj.by || targetSlot.photoBy || targetSlot.updatedBy || '';
+            timeStr = pObj.time || targetSlot.photoTime || targetSlot.updatedAt || '';
           }
           if (type === 'temp') {
             const conf = (typeof getBranchTempRanges === 'function' ? getBranchTempRanges(currentBranchId) : {})[rawId] || {};
@@ -3811,8 +3814,16 @@
       }
 
       if (!selectedPhotoUrl) {
-        // Fallback: look up in hqTodayPhotos
-        const match = (hqTodayPhotos || []).find(p => p.branchId === bId && p.rawId === rawId && p.shiftId === shiftId && (type ? p.type === type : true) && (!targetPhotoId || p.photoId === targetPhotoId));
+        // Fallback: look up in hqTodayPhotos with tolerant match
+        const match = (hqTodayPhotos || []).find(p => {
+          const branchMatches = (p.branchId === bId);
+          const typeMatches = (type ? p.type === type : true);
+          const rawIdMatches = (p.rawId === rawId || p.rawId === encodeFirebaseKey(rawId) || decodeFirebaseKey(p.rawId) === decodeFirebaseKey(rawId));
+          const shiftMatches = (p.shiftId === shiftId);
+          const photoMatches = (!targetPhotoId || p.photoId === targetPhotoId);
+          return branchMatches && typeMatches && rawIdMatches && shiftMatches && photoMatches;
+        });
+
         if (match && match.photoUrl) {
           openEvidencePhotoModal(match.photoUrl, match.title || taskTitle || rawId, {
             rawId: match.rawId,
@@ -3825,6 +3836,22 @@
           });
           return;
         }
+
+        // Secondary fallback: any photo for this rawId in hqTodayPhotos
+        const anyMatch = (hqTodayPhotos || []).find(p => p.branchId === bId && (p.rawId === rawId || decodeFirebaseKey(p.rawId) === decodeFirebaseKey(rawId)));
+        if (anyMatch && anyMatch.photoUrl) {
+          openEvidencePhotoModal(anyMatch.photoUrl, anyMatch.title || taskTitle || rawId, {
+            rawId: anyMatch.rawId,
+            shiftId: anyMatch.shiftId,
+            branchId: anyMatch.branchId,
+            type: anyMatch.type,
+            photoId: anyMatch.photoId,
+            supervisor: anyMatch.supervisor,
+            time: anyMatch.time
+          });
+          return;
+        }
+
         alert('لا توجد صورة إثبات مسجلة لهذا البند.');
         return;
       }
@@ -3851,19 +3878,32 @@
       if (!modal || !img) return;
 
       titleEl.innerText = taskTitle ? `📸 ${taskTitle}` : 'توثيق بصري للمهمة';
-      img.style.display = 'none';
-      if (spinner) spinner.style.display = 'block';
+      
+      if (photoUrl) {
+        img.style.display = 'none';
+        if (spinner) spinner.style.display = 'block';
 
-      img.onload = () => {
+        img.onload = () => {
+          if (spinner) spinner.style.display = 'none';
+          img.style.display = 'block';
+        };
+        img.onerror = () => {
+          if (spinner) spinner.style.display = 'none';
+          img.style.display = 'block';
+          img.alt = 'تعذر تحميل الصورة';
+        };
+        img.src = photoUrl;
+
+        // Immediate check if cached/dataUrl is ready
+        if (img.complete && img.naturalWidth > 0) {
+          if (spinner) spinner.style.display = 'none';
+          img.style.display = 'block';
+        }
+      } else {
         if (spinner) spinner.style.display = 'none';
         img.style.display = 'block';
-      };
-      img.onerror = () => {
-        if (spinner) spinner.style.display = 'none';
-        img.style.display = 'block';
-        img.alt = 'تعذر تحميل الصورة';
-      };
-      img.src = photoUrl;
+        img.alt = 'لا توجد صورة متوفرة';
+      }
 
       const branchObj = getBranchById(meta.branchId || currentBranchId);
       const branchName = branchObj ? branchObj.nameAr : (currentBranchId || 'ديوان ماركت');
@@ -3898,21 +3938,39 @@
           `;
         }
 
-        btnsHtml += `
-          <a href="${photoUrl}" target="_blank" download="evidence_${Date.now()}.jpg" class="btn btn-sm btn-outline-white" style="font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">⬇️ تحميل الأصل</a>
-        `;
+        if (photoUrl) {
+          btnsHtml += `
+            <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="downloadDirectPhoto('${escapeSingleQuotes(photoUrl)}')">⬇️ تحميل الأصل</button>
+          `;
+        }
 
         actionsEl.innerHTML = btnsHtml;
       }
 
+      modal.classList.add('open');
       modal.style.display = 'flex';
+      document.body.classList.add('modal-open');
     }
 
     function closeEvidencePhotoModal() {
       const modal = document.getElementById('evidencePhotoModal');
-      if (modal) modal.style.display = 'none';
+      if (modal) {
+        modal.classList.remove('open');
+        modal.style.display = 'none';
+      }
+      document.body.classList.remove('modal-open');
       const img = document.getElementById('evidenceModalImage');
       if (img) img.src = '';
+    }
+
+    function downloadDirectPhoto(url) {
+      if (!url) return;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `evidence_${Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     }
 
     /* ============================================================
@@ -4109,14 +4167,41 @@
       }
 
       renderEvidenceGallery();
+      modal.classList.add('open');
       modal.style.display = 'flex';
       document.body.classList.add('modal-open');
     }
 
     function closeEvidenceGalleryModal() {
       const modal = document.getElementById('evidenceGalleryModal');
-      if (modal) modal.style.display = 'none';
+      if (modal) {
+        modal.classList.remove('open');
+        modal.style.display = 'none';
+      }
       document.body.classList.remove('modal-open');
+    }
+
+    function openEvidencePhotoFromGallery(photoUniqueId) {
+      const p = (hqTodayPhotos || []).find(item => item.id === photoUniqueId);
+      if (!p) {
+        alert('تعذر العثور على بيانات الصورة المحددة.');
+        return;
+      }
+      openEvidencePhotoModal(p.photoUrl, p.title, {
+        rawId: p.rawId,
+        shiftId: p.shiftId,
+        branchId: p.branchId,
+        type: p.type,
+        photoId: p.photoId,
+        supervisor: p.supervisor,
+        time: p.time
+      });
+    }
+
+    function downloadEvidencePhotoById(photoUniqueId) {
+      const p = (hqTodayPhotos || []).find(item => item.id === photoUniqueId);
+      if (!p || !p.photoUrl) return;
+      downloadDirectPhoto(p.photoUrl);
     }
 
     function refreshEvidenceGallery(manual = false) {
@@ -4172,7 +4257,7 @@
                   <span style="font-size: 12px; font-weight: 800; color: #60a5fa;">🏢 ${escapeHtml(p.branchName)}</span>
                   <span style="font-size: 11px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${shIcon} ${escapeHtml(p.shiftName)}</span>
                 </div>
-                <div style="position: relative; height: 180px; background: #020617; cursor: pointer; display: flex; align-items: center; justify-content: center; overflow: hidden;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(p.photoUrl)}', '${escapeSingleQuotes(p.title)}', { rawId: '${escapeSingleQuotes(p.rawId)}', shiftId: '${p.shiftId}', branchId: '${p.branchId}', type: '${p.type}', photoId: '${p.photoId || ''}', supervisor: '${escapeSingleQuotes(p.supervisor)}', time: '${escapeSingleQuotes(p.time)}' })">
+                <div style="position: relative; height: 180px; background: #020617; cursor: pointer; display: flex; align-items: center; justify-content: center; overflow: hidden;" onclick="openEvidencePhotoFromGallery('${escapeSingleQuotes(p.id)}')">
                   <img src="${p.photoUrl}" alt="إثبات" style="width: 100%; height: 100%; object-fit: cover;">
                   <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.25); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;" onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='0'">
                     <span style="background: rgba(0,0,0,0.75); color: white; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 700;">🔍 تكبير الصورة</span>
@@ -4187,8 +4272,8 @@
                     </div>
                   </div>
                   <div style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-sm btn-primary" style="flex: 1; font-size: 11px; padding: 4px 8px; justify-content: center; background: #0284c7; border-color: #0369a1;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(p.photoUrl)}', '${escapeSingleQuotes(p.title)}', { rawId: '${escapeSingleQuotes(p.rawId)}', shiftId: '${p.shiftId}', branchId: '${p.branchId}', type: '${p.type}', photoId: '${p.photoId || ''}', supervisor: '${escapeSingleQuotes(p.supervisor)}', time: '${escapeSingleQuotes(p.time)}' })">🔍 تكبير</button>
-                    <a href="${p.photoUrl}" target="_blank" download="evidence_${p.branchId}_${p.shiftId}.jpg" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; text-decoration: none; display: inline-flex; align-items: center;" title="تحميل الأصل">⬇️</a>
+                    <button type="button" class="btn btn-sm btn-primary" style="flex: 1; font-size: 11px; padding: 4px 8px; justify-content: center; background: #0284c7; border-color: #0369a1;" onclick="openEvidencePhotoFromGallery('${escapeSingleQuotes(p.id)}')">🔍 تكبير</button>
+                    <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px;" onclick="downloadEvidencePhotoById('${escapeSingleQuotes(p.id)}')" title="تحميل الأصل">⬇️</button>
                     ${currentUserRole === 'admin' ? `
                       <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; color: #ef4444; border-color: #ef4444;" onclick="deleteEvidencePhotoFromCloud('${p.branchId}', '${escapeSingleQuotes(p.rawId)}', '${p.shiftId}', '${p.photoId || ''}', '${p.type}')" title="حذف هذه الصورة من السحابة لتوفير المساحة ومنع تراكمها">🗑️ مسح</button>
                       <button type="button" class="btn btn-sm btn-outline-white" style="font-size: 11px; padding: 4px 8px; color: #38bdf8; border-color: #0284c7;" onclick="closeEvidenceGalleryModal(); onAdminSwitchBranch('${p.branchId}');" title="الانتقال إلى ورقة هذا الفرع">🏢 الفرع</button>

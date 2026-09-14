@@ -2907,4 +2907,27 @@
   50% { opacity: 0.5; }
 }
 
+/* Evidence Modals Robust Display Rules */
+#evidencePhotoModal,
+#evidenceGalleryModal {
+  z-index: 100050 !important;
+}
+
+#evidencePhotoModal.open,
+#evidenceGalleryModal.open {
+  display: flex !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  visibility: visible !important;
+}
+
+#evidencePhotoModal.open .modal-card,
+#evidenceGalleryModal.open .modal-card {
+  opacity: 1 !important;
+  transform: scale(1) translateY(0) !important;
+  visibility: visible !important;
+  display: flex !important;
+}
+
+
 
