@@ -96,7 +96,7 @@
       <p class="auth-subtitle">منصة مركزية موحدة لإدارة صالات وفروع ديوان ماركت 🛡️</p>
       <div id="securityVersionTag" style="text-align: center; margin: 0 auto 12px auto; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 10px; font-size: 11.5px; color: #10b981; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 6px;">
         <span>🔒</span>
-        <span>مصفوفة العمليات اليومية الموحدة (v4.3)</span>
+        <span>مصفوفة العمليات اليومية الموحدة (v4.4 - مؤمّن سحابياً 🛡️)</span>
       </div>
 
       <div class="form-group" style="text-align: right; margin-bottom: 12px;">
@@ -115,7 +115,7 @@
 
       <div class="form-group" style="text-align: right; margin-bottom: 6px;">
         <label for="authPinInput">🔑 أدخل رمز المرور السري (PIN):</label>
-        <input type="password" id="authPinInput" class="pin-input" maxlength="4" placeholder="••••" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
+        <input type="password" id="authPinInput" class="pin-input" maxlength="6" placeholder="••••••" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
       </div>
 
       <div class="keypad-grid">
@@ -299,6 +299,11 @@
           <span class="btn-icon">⚡</span>
           <span class="btn-text">إعدادات الإشعارات السحابية (Push)</span>
           <span class="btn-sub">ربط FCM لإرسال التنبيه والتطبيق مغلق</span>
+        </button>
+        <button type="button" class="admin-grid-btn" onclick="openSecurityAuditModal()" style="border-color: #6366f1;">
+          <span class="btn-icon">🛡️</span>
+          <span class="btn-text">سجل الرقابة وأمان الدخول</span>
+          <span class="btn-sub">مراقبة محاولات الدخول والتطفل بالثانية</span>
         </button>
       </div>
     </div>
@@ -1367,11 +1372,45 @@
     </div>
   </div>
 
+  <!-- SECURITY AUDIT LOGS MODAL -->
+  <div class="modal-overlay" id="securityAuditModal">
+    <div class="modal-card modal-lg" style="max-width: 750px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="background: #1e293b; color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">🛡️</span>
+          <div>
+            <h3 style="margin: 0; font-size: 16px; font-weight: 800; color: #60a5fa;">سجل الرقابة وأمان الدخول</h3>
+            <p style="margin: 0; font-size: 11.5px; color: #94a3b8;">رصد لحظي لعمليات الدخول ومحاولات التطفل وكشف الأجهزة</p>
+          </div>
+        </div>
+        <button type="button" class="btn-close" style="color: white;" onclick="closeSecurityAuditModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 14px; overflow-y: auto; flex: 1;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <div style="font-size: 12px; font-weight: 700; color: var(--text-muted);">
+            <span>السجلات اللحظية المباشرة (سحابياً عبر Firebase)</span>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-white" onclick="fetchSecurityAuditLogs(true)" style="font-size: 11.5px; padding: 3px 8px;">
+            🔄 تحديث السجل
+          </button>
+        </div>
+        <div id="securityAuditLogsContainer" style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px;">
+            ⏳ جاري تحميل سجلات الأمان...
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 10px 14px; background: #f8fafc; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;">
+        <button type="button" class="btn btn-outline-white" onclick="closeSecurityAuditModal()">إغلاق النافذة</button>
+      </div>
+    </div>
+  </div>
+
   <!-- TOAST NOTIFICATION -->
   <div class="toast" id="appToast">
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789220000"></script>
+  <script src="assets/js/app.js?v=1789230000"></script>
 </body>
 </html>

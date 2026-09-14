@@ -491,8 +491,11 @@
        ============================================================ */
     const APP_CONFIG = {
       PIN_LENGTH: 4,
+      MIN_PIN_LENGTH: 4,
+      MAX_PIN_LENGTH: 6,
       MAX_ATTEMPTS: 5,
-      LOCKOUT_DURATION: 30, // seconds
+      LOCKOUT_DURATION: 30, // seconds (local cooldown)
+      CLOUD_LOCKOUT_DURATION_MS: 15 * 60 * 1000, // 15 minutes cloud lockout on 5 consecutive failures
       TOAST_DURATION: 3000, // ms
       ARCHIVE_LIMIT: 30
     };
@@ -1864,12 +1867,52 @@
       }, 1000);
     }
 
+    /* ============================================================
+       SECURITY AUDIT LOGGING & CLOUD ANTI-BRUTE-FORCE SYSTEM
+       ============================================================ */
+    function logSecurityAudit(auditData) {
+      try {
+        const logId = 'sec_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        const fullLog = {
+          id: logId,
+          timestamp: Date.now(),
+          timeFormatted: new Date().toLocaleDateString('ar-EG') + ' ' + new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          userId: auditData.userId || 'unknown',
+          userName: auditData.userName || 'غير محدد',
+          role: auditData.role || 'unknown',
+          branchId: auditData.branchId || currentBranchId || 'all',
+          eventType: auditData.eventType || 'INFO',
+          outcome: auditData.outcome || '',
+          attemptsCount: auditData.attemptsCount || 0,
+          details: auditData.details || '',
+          platform: getDevicePlatformString() || 'web',
+          userAgent: (navigator && navigator.userAgent) ? navigator.userAgent.substring(0, 150) : ''
+        };
+
+        // Cache locally for offline resilience
+        const localLogsKey = 'diwan_security_logs_cache';
+        const cached = safeJsonParse(safeGetItem(localLogsKey), []);
+        cached.unshift(fullLog);
+        safeSetItem(localLogsKey, JSON.stringify(cached.slice(0, 50)));
+
+        // Push to Firebase RTDB (Append-Only under security_audit_logs)
+        if (firebaseDb) {
+          firebaseDb.ref('security_audit_logs/' + logId).set(fullLog).catch(e => {
+            console.warn('Security audit log push failed:', e);
+          });
+        }
+      } catch (err) {
+        console.warn('Error in logSecurityAudit:', err);
+      }
+    }
+
     function pressKey(num) {
       if (lockoutRemaining > 0) return;
       const input = document.getElementById('authPinInput');
-      if (input.value.length < 4) {
+      const maxLen = APP_CONFIG.MAX_PIN_LENGTH || 6;
+      if (input.value.length < maxLen) {
         input.value += num;
-        if (input.value.length === 4) {
+        if (input.value.length === maxLen) {
           setTimeout(submitPin, 100);
         }
       }
@@ -1910,16 +1953,36 @@
         const list = getSupervisorsList();
         const errorBox = document.getElementById('authError');
 
-        if (!pin || pin.length !== APP_CONFIG.PIN_LENGTH) {
-          errorBox.innerText = `يرجى إدخال رمز PIN مكون من ${APP_CONFIG.PIN_LENGTH} أرقام.`;
-          return;
-        }
-
         const selectedSupId = supSelect ? supSelect.value : '';
         const selectedSup = list.find(s => s.id === selectedSupId);
 
         if (!selectedSup) {
           errorBox.innerText = 'يرجى اختيار اسم المشرف أولاً.';
+          return;
+        }
+
+        // 1. Cloud-Based Lockout Verification: Check if account was locked in Firebase
+        if (firebaseDb) {
+          try {
+            const lockSnap = await firebaseDb.ref('auth_lockouts/' + selectedSup.id).once('value');
+            const lockVal = lockSnap.val();
+            if (lockVal && lockVal.lockedUntil) {
+              const now = Date.now();
+              if (now < lockVal.lockedUntil) {
+                const remMin = Math.max(1, Math.ceil((lockVal.lockedUntil - now) / 60000));
+                errorBox.innerText = `🔒 هذا الحساب مقفل أمنياً سحابياً لحمايته من التخمين المتكرر. يرجى الانتظار ${remMin} دقيقة والمحاولة مجدداً.`;
+                return;
+              }
+            }
+          } catch (e) {
+            console.warn('Cloud lockout check error:', e);
+          }
+        }
+
+        const minLen = APP_CONFIG.MIN_PIN_LENGTH || 4;
+        const maxLen = APP_CONFIG.MAX_PIN_LENGTH || 6;
+        if (!pin || pin.length < minLen || pin.length > maxLen || !/^\d+$/.test(pin)) {
+          errorBox.innerText = `يرجى إدخال رمز PIN صالح (من ${minLen} إلى ${maxLen} أرقام).`;
           return;
         }
 
@@ -1939,6 +2002,22 @@
 
         if (matchedUser) {
           failedAttempts = 0;
+          // Clear any cloud lockout on successful login
+          if (firebaseDb) {
+            firebaseDb.ref('auth_lockouts/' + matchedUser.id).remove().catch(() => {});
+          }
+
+          // Record successful login in security audit trail
+          logSecurityAudit({
+            userId: matchedUser.id,
+            userName: matchedUser.name,
+            role: matchedUser.role,
+            branchId: currentBranchId,
+            eventType: 'LOGIN_SUCCESS',
+            outcome: 'دخول ناجح',
+            details: 'تم التحقق من الرمز والدخول إلى لوحة العمليات بنجاح'
+          });
+
           const prevSavedUid = localStorage.getItem('diwan_saved_user_id');
           currentSupervisor = matchedUser.name;
           currentUserId = matchedUser.id;
@@ -2073,11 +2152,51 @@
         } else {
           failedAttempts++;
           document.getElementById('authPinInput').value = '';
-          if (failedAttempts >= APP_CONFIG.MAX_ATTEMPTS) {
+
+          // Cloud lockout tracking
+          let cloudCount = failedAttempts;
+          let isCloudLocked = false;
+          if (firebaseDb) {
+            try {
+              const lockRef = firebaseDb.ref('auth_lockouts/' + selectedSup.id);
+              const snap = await lockRef.once('value');
+              const cur = snap.val() || {};
+              cloudCount = (cur.failedAttempts || 0) + 1;
+              const lockData = {
+                failedAttempts: cloudCount,
+                lastFailedAt: firebase.database.ServerValue.TIMESTAMP,
+                platform: getDevicePlatformString() || 'web'
+              };
+              if (cloudCount >= APP_CONFIG.MAX_ATTEMPTS) {
+                isCloudLocked = true;
+                lockData.lockedUntil = Date.now() + (APP_CONFIG.CLOUD_LOCKOUT_DURATION_MS || 900000);
+              }
+              await lockRef.update(lockData);
+            } catch (e) {
+              console.warn('Error updating cloud lockout:', e);
+            }
+          }
+
+          // Record security audit event
+          logSecurityAudit({
+            userId: selectedSup.id,
+            userName: selectedSup.name,
+            role: selectedSup.role,
+            branchId: currentBranchId,
+            eventType: isCloudLocked ? 'ACCOUNT_LOCKED' : 'LOGIN_FAILED',
+            outcome: isCloudLocked ? 'قفل الحساب سحابياً 15 دقيقة' : 'رمز PIN غير صحيح',
+            attemptsCount: cloudCount,
+            details: isCloudLocked
+              ? 'تم قفل الحساب سحابياً على جميع الأجهزة بعد 5 محاولات متتالية خاطئة'
+              : `محاولة دخول فاشلة برمز غير صحيح (المحاولة ${cloudCount} من ${APP_CONFIG.MAX_ATTEMPTS})`
+          });
+
+          if (isCloudLocked || failedAttempts >= APP_CONFIG.MAX_ATTEMPTS) {
             startLockout(APP_CONFIG.LOCKOUT_DURATION);
+            errorBox.innerText = '🔒 تم قفل الحساب سحابياً لحمايته من التطفل والتخمين بعد 5 محاولات خاطئة متتالية. يرجى الانتظار 15 دقيقة.';
           } else {
-            const left = APP_CONFIG.MAX_ATTEMPTS - failedAttempts;
-            errorBox.innerText = `❌ رمز PIN غير صحيح لـ (${selectedSup.name})! المتبقي: ${left} محاولات قبل القفل.`;
+            const left = Math.max(1, APP_CONFIG.MAX_ATTEMPTS - cloudCount);
+            errorBox.innerText = `❌ رمز PIN غير صحيح لـ (${selectedSup.name})! المتبقي: ${left} محاولات قبل القفل السحابي.`;
             const card = document.querySelector('.auth-card');
             if (card) {
               card.classList.remove('shake-anim');
@@ -5454,8 +5573,10 @@
 
       if (!id) {
         // ADD NEW SUPERVISOR
-        if (!pin || pin.length !== APP_CONFIG.PIN_LENGTH || !/^[0-9]{4}$/.test(pin)) {
-          errBox.innerText = `يرجى إدخال رمز PIN مكون من ${APP_CONFIG.PIN_LENGTH} أرقام عددية.`;
+        const minL = APP_CONFIG.MIN_PIN_LENGTH || 4;
+        const maxL = APP_CONFIG.MAX_PIN_LENGTH || 6;
+        if (!pin || pin.length < minL || pin.length > maxL || !/^\d+$/.test(pin)) {
+          errBox.innerText = `يرجى إدخال رمز PIN مكون من ${minL} إلى ${maxL} أرقام عددية.`;
           return;
         }
         if (pin !== confirmPin) {
@@ -5497,8 +5618,10 @@
 
         // If PIN was entered, update it with salt
         if (pin) {
-          if (pin.length !== APP_CONFIG.PIN_LENGTH || !/^[0-9]{4}$/.test(pin)) {
-            errBox.innerText = `رمز PIN يجب أن يتكون من ${APP_CONFIG.PIN_LENGTH} أرقام عددية.`;
+          const minL = APP_CONFIG.MIN_PIN_LENGTH || 4;
+          const maxL = APP_CONFIG.MAX_PIN_LENGTH || 6;
+          if (pin.length < minL || pin.length > maxL || !/^\d+$/.test(pin)) {
+            errBox.innerText = `رمز PIN يجب أن يتكون من ${minL} إلى ${maxL} أرقام عددية.`;
             return;
           }
           if (pin !== confirmPin) {
@@ -9088,3 +9211,128 @@ if (window._callAudioCtx) {
         requestScreenWakeLock('visibility_resume');
       }
     });
+
+    /* ============================================================
+       SECURITY AUDIT MODAL CONTROLLER (FOR EXECUTIVES)
+       ============================================================ */
+    function openSecurityAuditModal() {
+      if (currentUserRole !== 'admin') {
+        alert("عذراً، استعراض سجلات أمان الدخول مخصص للإدارة العليا فقط.");
+        return;
+      }
+      document.body.classList.add('modal-open');
+      const modal = document.getElementById('securityAuditModal');
+      if (modal) modal.classList.add('open');
+      fetchSecurityAuditLogs(false);
+    }
+
+    function closeSecurityAuditModal() {
+      document.body.classList.remove('modal-open');
+      const modal = document.getElementById('securityAuditModal');
+      if (modal) modal.classList.remove('open');
+    }
+
+    function fetchSecurityAuditLogs(manualRefresh = false) {
+      const container = document.getElementById('securityAuditLogsContainer');
+      if (!container) return;
+
+      if (manualRefresh) {
+        container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px;">⏳ جاري تحديث السجلات السحابية...</div>';
+      }
+
+      // Read local cache first for instant render
+      const localLogsKey = 'diwan_security_logs_cache';
+      let logs = safeJsonParse(safeGetItem(localLogsKey), []);
+
+      const renderLogs = (items) => {
+        if (!items || items.length === 0) {
+          container.innerHTML = `
+            <div style="text-align: center; padding: 30px; color: #64748b; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1;">
+              <span style="font-size: 24px; display: block; margin-bottom: 6px;">🛡️</span>
+              <strong>لا توجد سجلات أمان مسجلة بعد.</strong>
+              <p style="margin: 4px 0 0 0; font-size: 11.5px; color: #94a3b8;">سيتم توثيق كل محاولة دخول تلقائياً ومزامنتها سحابياً.</p>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = items.slice(0, 40).map(item => {
+          const isSuccess = item.eventType === 'LOGIN_SUCCESS';
+          const isLocked = item.eventType === 'ACCOUNT_LOCKED';
+          
+          let badgeBg = '#ecfdf5';
+          let badgeBorder = '#a7f3d0';
+          let badgeColor = '#065f46';
+          let badgeIcon = '🟢';
+          let titleText = 'تسجيل دخول ناجح';
+
+          if (isLocked) {
+            badgeBg = '#fdf2f8';
+            badgeBorder = '#fbcfe8';
+            badgeColor = '#9d174d';
+            badgeIcon = '🔒';
+            titleText = 'قفل الحساب سحابياً (تخمين)';
+          } else if (!isSuccess) {
+            badgeBg = '#fef2f2';
+            badgeBorder = '#fecaca';
+            badgeColor = '#991b1b';
+            badgeIcon = '🔴';
+            titleText = 'رمز PIN غير صحيح';
+          }
+
+          const bObj = getBranchById(item.branchId);
+          const bLabel = bObj ? bObj.nameAr : (item.branchId === 'all' ? 'كافة الفروع' : item.branchId);
+
+          return `
+            <div style="background: white; border: 1px solid ${badgeBorder}; border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow-sm); display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 220px;">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;">
+                  <span style="background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;">
+                    ${badgeIcon} ${titleText}
+                  </span>
+                  <strong style="font-size: 13px; color: var(--secondary);">${escapeHtml(item.userName || '')}</strong>
+                  <span style="font-size: 11px; color: #64748b; background: #f1f5f9; padding: 1px 6px; border-radius: 4px;">📍 ${escapeHtml(bLabel)}</span>
+                </div>
+                <div style="font-size: 12px; color: #334155; margin-bottom: 3px;">
+                  ${escapeHtml(item.details || '')}
+                </div>
+                <div style="font-size: 11px; color: #64748b; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                  <span>📱 الجهاز: <strong>${escapeHtml(item.platform || 'غير محدد')}</strong></span>
+                  ${item.userAgent ? `<span title="${escapeHtml(item.userAgent)}" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8;">${escapeHtml(item.userAgent)}</span>` : ''}
+                </div>
+              </div>
+              <div style="text-align: left; font-size: 11px; color: #64748b; font-family: monospace; white-space: nowrap;">
+                🕒 ${escapeHtml(item.timeFormatted || '')}
+              </div>
+            </div>
+          `;
+        }).join('');
+      };
+
+      // Show local cached logs immediately
+      if (logs.length > 0 && !manualRefresh) {
+        renderLogs(logs);
+      }
+
+      // Fetch fresh records from Firebase RTDB (security_audit_logs)
+      if (firebaseDb) {
+        firebaseDb.ref('security_audit_logs')
+          .limitToLast(40)
+          .once('value')
+          .then(snap => {
+            const val = snap.val();
+            if (val && typeof val === 'object') {
+              const remoteList = Object.values(val);
+              remoteList.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+              safeSetItem(localLogsKey, JSON.stringify(remoteList));
+              renderLogs(remoteList);
+            } else if (logs.length === 0) {
+              renderLogs([]);
+            }
+          })
+          .catch(err => {
+            console.warn('Error reading security audit logs from Firebase:', err);
+            if (logs.length > 0) renderLogs(logs);
+          });
+      }
+    }

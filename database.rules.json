@@ -1,0 +1,83 @@
+{
+  "rules": {
+    // إغلاق أي مسارات غير مصرح بها صراحة
+    ".read": false,
+    ".write": false,
+
+    // 1. التوجيهات الإدارية وتوكنات الإشعارات حسب الفروع
+    "branches": {
+      "$branchId": {
+        // قراءة التوجيهات والتوكنات متاحة للفرع
+        ".read": true,
+
+        "directives": {
+          "$directiveId": {
+            // السماح بالإضافة (Create) أو تعديل حقل الإقرار فقط (Acknowledge) دون إمكانية الحذف
+            ".write": "!data.exists() || (newData.exists() && newData.child('id').val() === data.child('id').val())"
+          }
+        },
+
+        "fcm_tokens": {
+          "$userId": {
+            // تسجيل وتحديث توكن الجهاز للإشعار
+            ".write": "newData.exists()"
+          }
+        }
+      }
+    },
+
+    // 2. حالة الاتصال اللحظي للمشرفين (Presence Heartbeats)
+    "presence": {
+      ".read": true,
+      "$userId": {
+        // يسمح بتحديث الحالة بشرط وجود حقل status و lastSeen
+        ".write": "newData.hasChildren(['status', 'lastSeen'])"
+      }
+    },
+
+    // 3. أجهزة وتوكنات الإشعارات المركزية (FCM Devices)
+    "fcm_devices": {
+      ".read": true,
+      "$userId": {
+        ".write": "newData.exists()"
+      }
+    },
+
+    // 4. المكالمات الصوتية اللحظية (WebRTC Signaling)
+    "calls": {
+      ".read": true,
+      "$callId": {
+        // إتاحة بدء وتحديث وإنهاء المكالمات
+        ".write": "true"
+      }
+    },
+
+    // 5. قائمة المشرفين وتعيينات الفروع (Config / Supervisors)
+    "config": {
+      ".read": true,
+      "supervisors": {
+        // حماية القائمة: يجب أن تكون مصفوفة غير فارغة ولا تقبل الحذف الشامل
+        ".write": "newData.exists() && newData.val() != null"
+      }
+    },
+
+    // 6. الحظر السحابي ضد التخمين (Cloud-Based Anti-Brute-Force Lockout)
+    "auth_lockouts": {
+      ".read": true,
+      "$userId": {
+        // تسجيل وتحديث عداد المحاولات وتوقيت الحظر
+        ".write": "true"
+      }
+    },
+
+    // 7. سجل الرقابة والتدقيق الأمني اللحظي (Security Audit Trail)
+    "security_audit_logs": {
+      // متاح للقراءة للإدارة العليا
+      ".read": true,
+      "$logId": {
+        // كتابة فقط (Append-Only): لا يمكن تعديل أو حذف أي سجل بعد كتابته
+        ".write": "!data.exists() && newData.exists()"
+      }
+    }
+  }
+}
