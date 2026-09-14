@@ -34,10 +34,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   
-  <!-- Firebase App, Realtime Database & Cloud Messaging SDKs (CDN) -->
+  <!-- Firebase App, Realtime Database, Cloud Messaging & Cloud Storage SDKs (CDN) -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
   <script>
     // Register Service Worker for true background mobile notifications & lock-screen incoming calls
     if ('serviceWorker' in navigator) {
@@ -96,7 +97,7 @@
       <p class="auth-subtitle">منصة مركزية موحدة لإدارة صالات وفروع ديوان ماركت 🛡️</p>
       <div id="securityVersionTag" style="text-align: center; margin: 0 auto 12px auto; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 10px; font-size: 11.5px; color: #10b981; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 6px;">
         <span>🔒</span>
-        <span>مصفوفة العمليات اليومية الموحدة (v4.5 - دخول فوري 4 أرقام ⚡)</span>
+        <span>مصفوفة العمليات اليومية الموحدة (v4.6 - التوثيق البصري للصالات 📸)</span>
       </div>
 
       <div class="form-group" style="text-align: right; margin-bottom: 12px;">
@@ -1372,6 +1373,44 @@
     </div>
   </div>
 
+  <!-- EVIDENCE CAMERA INPUT (Hidden file input strictly requesting camera environment) -->
+  <input type="file" id="evidenceCameraInput" accept="image/*" capture="environment" style="display: none;" onchange="handleEvidencePhotoSelected(event)">
+
+  <!-- EVIDENCE PHOTO VIEWER LIGHTBOX MODAL -->
+  <div class="modal-overlay" id="evidencePhotoModal" style="display: none; z-index: 100050;" onclick="if(event.target === this) closeEvidencePhotoModal()">
+    <div class="modal-card" style="max-width: 650px; max-height: 92vh; padding: 0; overflow: hidden; border-radius: 12px; background: #0f172a; color: white; display: flex; flex-direction: column;">
+      <div class="modal-header" style="background: #1e293b; padding: 12px 16px; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">📸</span>
+          <div>
+            <h3 id="evidenceModalTitle" style="font-size: 15px; font-weight: 800; margin: 0; color: #f8fafc;">توثيق بصري للمهمة</h3>
+            <span id="evidenceModalSub" style="font-size: 11px; color: #94a3b8;">إثبات إنجاز العمل الميداني بالصورة الحية</span>
+          </div>
+        </div>
+        <button type="button" class="btn-close" style="color: white; font-size: 18px; background: none; border: none; cursor: pointer;" onclick="closeEvidencePhotoModal()">✕</button>
+      </div>
+
+      <div class="modal-body" style="padding: 12px; text-align: center; background: #0b1120; overflow-y: auto; flex: 1;">
+        <div id="evidenceImageLoadingSpinner" style="display: none; padding: 30px; font-size: 13px; color: #94a3b8;">
+          ⏳ جاري تحميل واستعراض الصورة...
+        </div>
+        <div style="position: relative; min-height: 200px; display: flex; align-items: center; justify-content: center; background: #020617; border-radius: 8px; overflow: hidden;">
+          <img id="evidenceModalImage" src="" alt="صورة إثبات الإنجاز" style="max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+        </div>
+        <div id="evidenceModalMetaBox" style="margin-top: 10px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 14px; text-align: right; font-size: 12px; line-height: 1.6; color: #e2e8f0;">
+          <!-- Meta populated dynamically -->
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background: #1e293b; padding: 10px 16px; border-top: 1px solid #334155; display: flex; align-items: center; justify-content: space-between;">
+        <div id="evidenceModalActions" style="display: flex; gap: 8px;">
+          <!-- Retake or delete button if editable -->
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="closeEvidencePhotoModal()" style="background: #3b82f6; border-color: #2563eb; font-weight: 700;">إغلاق المعاينة</button>
+      </div>
+    </div>
+  </div>
+
   <!-- SECURITY AUDIT LOGS MODAL -->
   <div class="modal-overlay" id="securityAuditModal">
     <div class="modal-card modal-lg" style="max-width: 750px; max-height: 90vh; display: flex; flex-direction: column;">
@@ -1411,6 +1450,6 @@
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789232000"></script>
+  <script src="assets/js/app.js?v=1789233000"></script>
 </body>
 </html>

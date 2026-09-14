@@ -1,0 +1,24 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // مسار صور التوثيق البصري لمهام الفروع
+    match /branch_evidence/{branchId}/{date}/{shiftId}/{fileName} {
+      // إتاحة القراءة داخل تطبيق العمليات
+      allow read: if true;
+
+      // السماح بالرفع بشرط ألا يتجاوز الحجم 1 ميغابايت وأن يكون نوع الملف صورة حصراً
+      allow write: if request.resource.size < 1 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+
+      // السماح بالحذف والتحديث لنفس المهمة
+      allow delete: if true;
+    }
+
+    // إغلاق أي مسارات أخرى افتراضياً
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

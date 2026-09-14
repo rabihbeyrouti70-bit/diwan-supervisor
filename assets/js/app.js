@@ -1239,6 +1239,8 @@
     // Firebase state
     let firebaseDb = null;
     let firebaseRef = null;
+    let firebaseStorage = null;
+    let activePhotoTarget = null;
 
     /* ============================================================
        INITIALIZATION
@@ -3060,6 +3062,14 @@
           firebase.initializeApp(config);
         }
         firebaseDb = firebase.database();
+        try {
+          if (firebase.storage) {
+            firebaseStorage = firebase.storage();
+            console.log("☁️ Firebase Cloud Storage initialized:", config.storageBucket);
+          }
+        } catch (stErr) {
+          console.warn("Firebase Cloud Storage init warning:", stErr);
+        }
         listenToFirebaseShift();
         listenToFirebaseSupervisors();
         listenToFirebaseBranchShifts();
@@ -3237,6 +3247,339 @@
       showToast("تم فتح كافة المهام 📂");
     }
 
+    /* ============================================================
+       VISUAL PROOF-OF-WORK (PHOTO EVIDENCE & CANVAS COMPRESSION)
+       ============================================================ */
+    
+    /**
+     * Client-side Image Compression and Automatic Visual Watermarking
+     * Reduces raw phone images (3MB-10MB) to ~60KB-90KB while permanently burning
+     * branch, supervisor, timestamp, and task name into the pixels.
+     */
+    function compressAndWatermarkImage(file, meta) {
+      return new Promise((resolve, reject) => {
+        if (!file || !file.type.startsWith('image/')) {
+          return reject(new Error('الملف المختار ليس صورة صالحة.'));
+        }
+
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('فشل قراءة ملف الصورة.'));
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onerror = () => reject(new Error('فشل تحميل الصورة في الذاكرة.'));
+          img.onload = () => {
+            try {
+              // 1. Calculate scaled dimensions (max width/height 1280px)
+              const maxDim = 1280;
+              let width = img.width;
+              let height = img.height;
+
+              if (width > maxDim || height > maxDim) {
+                if (width > height) {
+                  height = Math.round((height * maxDim) / width);
+                  width = maxDim;
+                } else {
+                  width = Math.round((width * maxDim) / height);
+                  height = maxDim;
+                }
+              }
+
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+
+              // Draw original image resized
+              ctx.drawImage(img, 0, 0, width, height);
+
+              // 2. Burned-in Visual Watermark Banner
+              const bannerH = Math.max(54, Math.round(height * 0.08));
+              const bannerY = height - bannerH;
+
+              // Dark translucent background bar
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+              ctx.fillRect(0, bannerY, width, bannerH);
+
+              // Emerald accent line at top of banner
+              ctx.fillStyle = '#10b981';
+              ctx.fillRect(0, bannerY, width, Math.max(2, Math.round(bannerH * 0.05)));
+
+              // Watermark text styling
+              const fontSize = Math.max(12, Math.round(bannerH * 0.32));
+              ctx.font = `bold ${fontSize}px 'Cairo', 'Segoe UI', Tahoma, sans-serif`;
+              ctx.textBaseline = 'middle';
+
+              const branchObj = getBranchById(meta.branchId || currentBranchId);
+              const branchName = branchObj ? branchObj.nameAr : (currentBranchId || 'ديوان ماركت');
+              const supervisorName = meta.supervisor || currentSupervisor || 'المشرف';
+              const now = new Date();
+              const timeStr = now.toLocaleDateString('ar-EG') + ' ' + now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              const taskTitle = (meta.taskTitle || 'توثيق مهمة').substring(0, 45);
+
+              // Right-to-Left Arabic text
+              ctx.fillStyle = '#ffffff';
+              ctx.direction = 'rtl';
+              const line1Y = bannerY + Math.round(bannerH * 0.35);
+              const line2Y = bannerY + Math.round(bannerH * 0.72);
+              const padX = Math.round(width * 0.02);
+
+              const textLine1 = `🏢 ديوان ماركت – ${branchName}   |   👤 المشرف: ${supervisorName}`;
+              const textLine2 = `🕒 ${timeStr}   |   📋 ${taskTitle}`;
+
+              ctx.fillText(textLine1, width - padX, line1Y);
+              ctx.fillStyle = '#cbd5e1';
+              ctx.fillText(textLine2, width - padX, line2Y);
+
+              // Brand watermark badge at left
+              ctx.fillStyle = '#10b981';
+              ctx.direction = 'ltr';
+              ctx.font = `bold ${Math.max(10, Math.round(fontSize * 0.85))}px sans-serif`;
+              ctx.fillText('DIWAN VERIFIED 🛡️', padX, line1Y);
+
+              // 3. Export to highly compressed JPEG Blob (quality 0.72)
+              canvas.toBlob(
+                (blob) => {
+                  if (!blob) return reject(new Error('فشل ضغط وتصدير الصورة.'));
+                  console.log(`📸 Image compressed & watermarked: original ${(file.size / 1024).toFixed(1)} KB -> ${(blob.size / 1024).toFixed(1)} KB`);
+                  resolve({
+                    blob,
+                    width,
+                    height,
+                    sizeBytes: blob.size,
+                    timeFormatted: timeStr,
+                    timestamp: now.getTime()
+                  });
+                },
+                'image/jpeg',
+                0.72
+              );
+            } catch (canvasErr) {
+              reject(canvasErr);
+            }
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function triggerPhotoCapture(rawId, shiftId, taskTitle, type = 'task') {
+      if (!canEditShift(shiftId)) {
+        alert('عذراً، لا يمكنك إرفاق صور لهذه الوردية لأنها خارج صلاحية ورديتك الحالية.');
+        return;
+      }
+
+      activePhotoTarget = {
+        rawId,
+        shiftId,
+        taskTitle,
+        type,
+        branchId: currentBranchId,
+        supervisor: currentSupervisor
+      };
+
+      const fileInput = document.getElementById('evidenceCameraInput');
+      if (fileInput) {
+        fileInput.value = '';
+        fileInput.click();
+      }
+    }
+
+    async function handleEvidencePhotoSelected(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file || !activePhotoTarget) return;
+
+      const target = { ...activePhotoTarget };
+      activePhotoTarget = null; // reset
+
+      showToast('⏳ جاري ضغط وتوثيق الصورة سحابياً...');
+      setEvidenceUploadingState(target.rawId, target.shiftId, true);
+
+      try {
+        // 1. Client-side compression & visual watermark
+        const processed = await compressAndWatermarkImage(file, {
+          branchId: target.branchId,
+          supervisor: target.supervisor,
+          taskTitle: target.taskTitle
+        });
+
+        // 2. Upload to Firebase Cloud Storage
+        const downloadUrl = await uploadEvidencePhotoToStorage(processed.blob, target);
+
+        // 3. Save photo reference into task or temperature state
+        saveEvidencePhotoToState(target, downloadUrl, processed);
+
+        showToast('✅ تم توثيق المهمة بالصورة بنجاح!');
+      } catch (err) {
+        console.error('Evidence photo process error:', err);
+        alert('تعذر إرفاق الصورة: ' + (err.message || 'حدث خطأ أثناء معالجة الصورة'));
+      } finally {
+        setEvidenceUploadingState(target.rawId, target.shiftId, false);
+      }
+    }
+
+    async function uploadEvidencePhotoToStorage(blob, target) {
+      if (!firebaseStorage && firebase && firebase.storage) {
+        try { firebaseStorage = firebase.storage(); } catch (e) {}
+      }
+      if (!firebaseStorage) {
+        throw new Error('خدمة التخزين السحابي Firebase Storage غير مهيأة.');
+      }
+
+      const todayStr = currentDate || new Date().toISOString().split('T')[0];
+      const sanitizedId = encodeURIComponent(target.rawId).replace(/%/g, '_');
+      const fileName = `${sanitizedId}_${Date.now()}.jpg`;
+      const storagePath = `branch_evidence/${target.branchId}/${todayStr}/${target.shiftId}/${fileName}`;
+
+      const storageRef = firebaseStorage.ref(storagePath);
+      const metadata = {
+        contentType: 'image/jpeg',
+        customMetadata: {
+          branchId: target.branchId,
+          shiftId: target.shiftId,
+          taskId: target.rawId,
+          taskTitle: target.taskTitle || '',
+          supervisor: target.supervisor || currentSupervisor,
+          uploadedAt: String(Date.now())
+        }
+      };
+
+      const uploadTaskSnapshot = await storageRef.put(blob, metadata);
+      const downloadUrl = await uploadTaskSnapshot.ref.getDownloadURL();
+      return downloadUrl;
+    }
+
+    function saveEvidencePhotoToState(target, downloadUrl, processed) {
+      if (target.type === 'temp') {
+        if (!state.temperatures) state.temperatures = {};
+        if (!state.temperatures[target.rawId]) state.temperatures[target.rawId] = {};
+        if (!state.temperatures[target.rawId][target.shiftId]) state.temperatures[target.rawId][target.shiftId] = {};
+        state.temperatures[target.rawId][target.shiftId].photoUrl = downloadUrl;
+        state.temperatures[target.rawId][target.shiftId].photoBy = target.supervisor;
+        state.temperatures[target.rawId][target.shiftId].photoTime = processed.timeFormatted;
+      } else {
+        if (!state.items) state.items = {};
+        if (!state.items[target.rawId]) state.items[target.rawId] = {};
+        if (!state.items[target.rawId][target.shiftId]) state.items[target.rawId][target.shiftId] = { status: 'done' };
+
+        // Auto-mark task as done if it was pending
+        if (!state.items[target.rawId][target.shiftId].status || state.items[target.rawId][target.shiftId].status === 'pending') {
+          state.items[target.rawId][target.shiftId].status = 'done';
+          state.items[target.rawId][target.shiftId].updatedBy = target.supervisor;
+          state.items[target.rawId][target.shiftId].updatedAt = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        state.items[target.rawId][target.shiftId].photoUrl = downloadUrl;
+        state.items[target.rawId][target.shiftId].photoBy = target.supervisor;
+        state.items[target.rawId][target.shiftId].photoTime = processed.timeFormatted;
+      }
+
+      saveState();
+      renderSections();
+    }
+
+    function deleteEvidencePhoto(rawId, shiftId, type = 'task') {
+      if (!canEditShift(shiftId)) {
+        alert('عذراً، لا يمكنك حذف الصورة لأنها خارج صلاحية ورديتك.');
+        return;
+      }
+
+      if (!confirm('هل أنت متأكد من حذف صورة التوثيق؟ يمكنك التقاط صورة بديلة بعدها.')) return;
+
+      closeEvidencePhotoModal();
+
+      if (type === 'temp') {
+        if (state.temperatures && state.temperatures[rawId] && state.temperatures[rawId][shiftId]) {
+          delete state.temperatures[rawId][shiftId].photoUrl;
+          delete state.temperatures[rawId][shiftId].photoBy;
+          delete state.temperatures[rawId][shiftId].photoTime;
+        }
+      } else {
+        if (state.items && state.items[rawId] && state.items[rawId][shiftId]) {
+          delete state.items[rawId][shiftId].photoUrl;
+          delete state.items[rawId][shiftId].photoBy;
+          delete state.items[rawId][shiftId].photoTime;
+        }
+      }
+
+      saveState();
+      renderSections();
+      showToast('🗑️ تم حذف صورة التوثيق.');
+    }
+
+    function openEvidencePhotoModal(photoUrl, taskTitle, meta = {}) {
+      const modal = document.getElementById('evidencePhotoModal');
+      const img = document.getElementById('evidenceModalImage');
+      const titleEl = document.getElementById('evidenceModalTitle');
+      const metaBox = document.getElementById('evidenceModalMetaBox');
+      const actionsEl = document.getElementById('evidenceModalActions');
+      const spinner = document.getElementById('evidenceImageLoadingSpinner');
+
+      if (!modal || !img) return;
+
+      titleEl.innerText = taskTitle ? `📸 ${taskTitle}` : 'توثيق بصري للمهمة';
+      img.style.display = 'none';
+      if (spinner) spinner.style.display = 'block';
+
+      img.onload = () => {
+        if (spinner) spinner.style.display = 'none';
+        img.style.display = 'block';
+      };
+      img.onerror = () => {
+        if (spinner) spinner.style.display = 'none';
+        img.style.display = 'block';
+        img.alt = 'تعذر تحميل الصورة';
+      };
+      img.src = photoUrl;
+
+      const branchObj = getBranchById(meta.branchId || currentBranchId);
+      const branchName = branchObj ? branchObj.nameAr : (currentBranchId || 'ديوان ماركت');
+      const supervisorName = meta.supervisor || 'غير محدد';
+      const timeStr = meta.time || 'غير محدد';
+
+      metaBox.innerHTML = `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div>🏢 <strong>الفرع:</strong> ${escapeHtml(branchName)}</div>
+          <div>👤 <strong>المشرف:</strong> ${escapeHtml(supervisorName)}</div>
+          <div>🕒 <strong>التوقيت:</strong> ${escapeHtml(timeStr)}</div>
+          <div>🛡️ <strong>حالة الإثبات:</strong> <span style="color: #10b981; font-weight: 800;">موثق سحابياً بختم مائي ✅</span></div>
+        </div>
+      `;
+
+      if (actionsEl) {
+        const canEdit = meta.shiftId ? canEditShift(meta.shiftId) : false;
+        if (canEdit && meta.rawId) {
+          actionsEl.innerHTML = `
+            <button type="button" class="btn btn-sm btn-outline-white" style="color: #ef4444; border-color: #ef4444; font-size: 11px;" onclick="deleteEvidencePhoto('${escapeSingleQuotes(meta.rawId)}', '${meta.shiftId}', '${meta.type || 'task'}')">🗑️ حذف الصورة</button>
+            <button type="button" class="btn btn-sm btn-primary" style="background: #0284c7; border-color: #0369a1; font-size: 11px;" onclick="closeEvidencePhotoModal(); triggerPhotoCapture('${escapeSingleQuotes(meta.rawId)}', '${meta.shiftId}', '${escapeSingleQuotes(taskTitle)}', '${meta.type || 'task'}')">🔄 إعادة التقاط</button>
+          `;
+        } else {
+          actionsEl.innerHTML = `
+            <a href="${photoUrl}" target="_blank" download="evidence_${Date.now()}.jpg" class="btn btn-sm btn-outline-white" style="font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">⬇️ فتح الأصل</a>
+          `;
+        }
+      }
+
+      modal.style.display = 'flex';
+    }
+
+    function closeEvidencePhotoModal() {
+      const modal = document.getElementById('evidencePhotoModal');
+      if (modal) modal.style.display = 'none';
+      const img = document.getElementById('evidenceModalImage');
+      if (img) img.src = '';
+    }
+
+    function setEvidenceUploadingState(rawId, shiftId, isUploading) {
+      const el = document.getElementById(`evidence_slot_${encodeURIComponent(rawId)}_${shiftId}`);
+      if (!el) return;
+      if (isUploading) {
+        el.innerHTML = `<span class="evidence-upload-spinner">⏳ جاري الرفع...</span>`;
+      } else {
+        renderSections();
+      }
+    }
+
     function renderSections() {
       const container = document.getElementById('sectionsContainer');
       if (!container) return;
@@ -3362,6 +3705,18 @@
                         <button type="button" class="btn-slot-pill ${isProgress ? 'active-progress' : ''}" ${!editable ? 'disabled title="مقفلة - للعرض فقط"' : 'title="قيد العمل"'} onclick="setTaskShiftStatus('${escapeSingleQuotes(item.rawId)}', '${sh.id}', 'in_progress')">🔄 قيد العمل</button>
                         <button type="button" class="btn-slot-pill ${isCritical ? 'active-critical' : ''}" ${!editable ? 'disabled title="مقفلة - للعرض فقط"' : 'title="عطل طارئ"'} onclick="setTaskShiftStatus('${escapeSingleQuotes(item.rawId)}', '${sh.id}', 'critical')">🚨 عطل</button>
                       </div>
+                      <div id="evidence_slot_${encodeURIComponent(item.rawId)}_${sh.id}" style="margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                        ${shData.photoUrl ? `
+                          <button type="button" class="btn-evidence-badge" style="padding: 2px 6px; font-size: 10px;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(shData.photoUrl)}', '${escapeSingleQuotes(item.ar || item.en)}', { rawId: '${escapeSingleQuotes(item.rawId)}', shiftId: '${sh.id}', branchId: currentBranchId, supervisor: '${escapeSingleQuotes(shData.photoBy || shData.updatedBy || '')}', time: '${escapeSingleQuotes(shData.photoTime || shData.updatedAt || '')}' })" title="عرض صورة الإثبات">
+                            <img src="${shData.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
+                            <span>📸 إثبات</span>
+                          </button>
+                        ` : (editable ? `
+                          <button type="button" class="btn-add-evidence" style="padding: 2px 6px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${sh.id}', '${escapeSingleQuotes(item.ar || item.en)}')" title="التقاط صورة لإثبات الإنجاز">
+                            📷 إرفاق
+                          </button>
+                        ` : '')}
+                      </div>
                       ${(isCritical || shData.note) ? `
                         <input type="text" class="item-note-input" style="font-size: 11px; margin-top: 4px;" ${!editable ? 'readonly' : ''} placeholder="ملاحظة خاصة بالوردية..." value="${escapeHtml(shData.note || '')}" onchange="setTaskShiftNote('${escapeSingleQuotes(item.rawId)}', '${sh.id}', this.value)">
                       ` : ''}
@@ -3414,8 +3769,22 @@
                   </button>
                 </div>
               </div>
-              <div class="item-audit">
-                <span>👤 ${lastUpdated}</span>
+              <div class="item-audit" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <span>👤 ${lastUpdated}</span>
+                  <span id="evidence_slot_${encodeURIComponent(item.rawId)}_${activeShiftView}">
+                    ${activeData.photoUrl ? `
+                      <button type="button" class="btn-evidence-badge" onclick="openEvidencePhotoModal('${escapeSingleQuotes(activeData.photoUrl)}', '${escapeSingleQuotes(item.ar || item.en)}', { rawId: '${escapeSingleQuotes(item.rawId)}', shiftId: '${activeShiftView}', branchId: currentBranchId, supervisor: '${escapeSingleQuotes(activeData.photoBy || activeData.updatedBy || '')}', time: '${escapeSingleQuotes(activeData.photoTime || activeData.updatedAt || '')}' })" title="عرض صورة الإثبات">
+                        <img src="${activeData.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
+                        <span>📸 صورة التوثيق</span>
+                      </button>
+                    ` : (editable ? `
+                      <button type="button" class="btn-add-evidence" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${activeShiftView}', '${escapeSingleQuotes(item.ar || item.en)}')" title="التقاط صورة حية لإثبات إنجاز المهمة">
+                        📷 إرفاق صورة
+                      </button>
+                    ` : '')}
+                  </span>
+                </div>
                 ${activeData.status === 'critical' || activeData.note ? `
                   <input type="text" class="item-note-input" ${!editable ? 'readonly' : ''} placeholder="ملاحظة خاصة بالوردية..." 
                     value="${escapeHtml(activeData.note || '')}" 
@@ -3488,6 +3857,18 @@
                       </div>
                       <span class="temp-shift-who" title="${escapeHtml(who)}">👤 ${escapeHtml(who)}</span>
                       ${isAlert ? '<span style="color: #dc2626; font-size: 10px; font-weight: 800;">⚠️ غير طبيعي!</span>' : ''}
+                      <div id="evidence_temp_slot_${encodeURIComponent(tName)}_${sh.id}" style="margin-top: 4px; display: flex; justify-content: center;">
+                        ${shTemp.photoUrl ? `
+                          <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="openEvidencePhotoModal('${escapeSingleQuotes(shTemp.photoUrl)}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', { rawId: '${escapeSingleQuotes(tName)}', shiftId: '${sh.id}', type: 'temp', branchId: currentBranchId, supervisor: '${escapeSingleQuotes(shTemp.photoBy || shTemp.updatedBy || '')}', time: '${escapeSingleQuotes(shTemp.photoTime || shTemp.updatedAt || '')}' })" title="عرض صورة عداد الثلاجة">
+                            <img src="${shTemp.photoUrl}" class="evidence-thumb-preview" alt="معاينة">
+                            <span>📸 العداد</span>
+                          </button>
+                        ` : (editable ? `
+                          <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${sh.id}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="تصوير عداد الثلاجة للتوثيق">
+                            📷 العداد
+                          </button>
+                        ` : '')}
+                      </div>
                     </div>
                   `;
                 }).join('')}
