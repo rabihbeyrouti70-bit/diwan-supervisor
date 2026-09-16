@@ -486,16 +486,15 @@
 
     function isSectionSingleShift(sec, branchId) {
       if (!sec) return false;
-      if (sec.shiftMode === 'single') return true;
-      if (sec.shiftMode === 'multi') return false;
-      return isWarehouseSection(sec);
+      if (isWarehouseSection(sec)) return true;
+      return sec.shiftMode === 'single';
     }
 
     function normalizeSection(sec) {
       if (!sec) return sec;
       if (isWarehouseSection(sec)) {
-        if (!sec.targetRole) sec.targetRole = 'warehouse';
-        if (!sec.shiftMode) sec.shiftMode = 'single';
+        sec.targetRole = 'warehouse';
+        sec.shiftMode = 'single';
       } else {
         if (!sec.targetRole) sec.targetRole = 'floor';
         if (!sec.shiftMode) sec.shiftMode = 'multi';
@@ -694,6 +693,11 @@
       if (saved) {
         const parsed = safeJsonParse(saved);
         if (parsed && typeof parsed === 'object') {
+          Object.keys(parsed).forEach(bId => {
+            if (Array.isArray(parsed[bId])) {
+              parsed[bId].forEach(normalizeSection);
+            }
+          });
           memoryBranchSectionsCache = parsed;
           return parsed;
         }
@@ -1363,6 +1367,9 @@
 
     function setOperationalScope(scope) {
       activeOperationalScope = scope || 'all';
+      if (activeOperationalScope === 'warehouse') {
+        activeShiftView = 'all';
+      }
       ['All', 'Floor', 'Warehouse'].forEach(s => {
         const btn = document.getElementById('scopeBtn' + s);
         if (!btn) return;
@@ -1381,7 +1388,16 @@
           btn.style.fontWeight = '700';
         }
       });
+      if (typeof populateShiftSelect === 'function') {
+        populateShiftSelect(currentBranchId);
+      }
       renderSections();
+      if (typeof renderExcelSheetTabs === 'function') {
+        renderExcelSheetTabs();
+      }
+      if (typeof updateStats === 'function') {
+        updateStats();
+      }
     }
     window.setOperationalScope = setOperationalScope;
     let currentShiftType = "morning"; // Active operating shift for logging
@@ -2796,6 +2812,13 @@
     function populateShiftSelect(branchId) {
       const select = document.getElementById('shiftTypeSelect');
       if (!select) return;
+      if (activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper') {
+        select.innerHTML = `<option value="morning" selected>☀️ الوردية اليومية للمستودع (كامل اليوم)</option>`;
+        select.value = 'morning';
+        const badge = document.getElementById('activeShiftBadge');
+        if (badge) badge.innerText = '☀️ الوردية اليومية (كامل اليوم)';
+        return;
+      }
       const shifts = getBranchShifts(branchId || currentBranchId);
       select.innerHTML = shifts.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(getShiftDisplayName(s))}</option>`).join('');
 
@@ -4692,7 +4715,7 @@
             const isProgress = (st === 'in_progress');
             const isCritical = (st === 'critical');
             const who = shData.updatedBy ? `${shData.updatedBy} (${shData.updatedAt || ''})` : 'لم تفحص بعد';
-            const editable = canEditShift('morning');
+            const editable = canEditShift('morning', true);
 
             row.innerHTML = `
               <div class="item-main" style="margin-bottom: 6px;">
@@ -4954,7 +4977,7 @@
                   const isAlert = (val !== '' && !isNaN(numVal) && (numVal > conf.max || numVal < conf.min));
                   const shIcon = isSingleShift ? '☀️' : (sh.id === 'morning' ? '☀️' : (sh.id === 'evening' ? '🌆' : '🌙'));
                   const who = shTemp.updatedBy ? `${shTemp.updatedBy} (${shTemp.updatedAt || ''})` : 'لم تُسجل';
-                  const editable = canEditShift(targetShId);
+                  const editable = canEditShift(targetShId, isSingleShift);
 
                   return `
                     <div class="temp-shift-col ${isAlert ? 'alert' : ''} ${!editable ? 'slot-locked' : ''}">
@@ -5048,6 +5071,35 @@
         badge.innerText = `${b ? b.nameAr : currentBranchId} | ${currentDate}`;
       }
 
+      if (activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper') {
+        const stats = calculateShiftStats('morning');
+        const pctColor = stats.percentage === 100 ? '#059669' : (stats.percentage > 0 ? '#0284c7' : '#64748b');
+
+        // Determine active warehouse keepers
+        const whKeepers = new Set();
+        const bSections = getBranchSections(currentBranchId, false);
+        bSections.filter(s => isWarehouseSection(s)).forEach(sec => {
+          (sec.items || []).forEach(it => {
+            const entry = state.items[it.rawId];
+            if (entry) {
+              const d = entry['morning'] || entry['evening'] || entry['night'];
+              if (d && d.updatedBy && d.status !== 'pending') whKeepers.add(d.updatedBy);
+            }
+          });
+        });
+        const keeperDisplay = whKeepers.size > 0 ? Array.from(whKeepers).join('، ') : 'أمين المستودع';
+
+        track.innerHTML = `
+          <div class="excel-sheet-tab active" data-mode="all" onclick="setShiftViewMode('all')" title="الوردية اليومية الموحدة للمستودع (كامل اليوم)">
+            <span class="excel-tab-icon">☀️</span>
+            <span class="excel-tab-name">الوردية اليومية للمستودع (كامل اليوم)</span>
+            <span class="excel-tab-sup" title="المسؤول: ${escapeHtml(keeperDisplay)}">👤 ${escapeHtml(keeperDisplay)}</span>
+            <span class="excel-tab-pct" style="color: ${pctColor}; background: ${stats.percentage === 100 ? '#ecfdf5' : '#f8fafc'}; border: 1px solid ${pctColor}40;">${stats.percentage}%</span>
+          </div>
+        `;
+        return;
+      }
+
       // Master Tab: All Shifts Matrix Sheet
       const isAllActive = (activeShiftView === 'all');
       let tabsHtml = `
@@ -5121,7 +5173,11 @@
 
       const badge = document.getElementById('activeShiftBadge');
       if (badge) {
-        badge.innerText = (mode === 'all') ? 'مقارنة كافة الورديات' : getShiftName(currentBranchId, mode);
+        if (activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper') {
+          badge.innerText = '☀️ الوردية اليومية (كامل اليوم)';
+        } else {
+          badge.innerText = (mode === 'all') ? 'مقارنة كافة الورديات' : getShiftName(currentBranchId, mode);
+        }
       }
       renderAll();
     }
@@ -5134,16 +5190,16 @@
       }
     }
 
-    function canEditShift(shiftId) {
+    function canEditShift(shiftId, isSingleShift = false) {
       // 1. General Manager and Branch Managers have full override authority across all shifts
       if (currentUserRole === 'admin' || currentUserRole === 'branch_manager') {
         return true;
       }
 
-      // 2. Warehouse Keepers work daytime daily shift (06:00 to 21:00)
-      if (currentUserRole === 'warehouse_keeper') {
+      // 2. Warehouse Keepers or single-shift warehouse tasks: daytime operational window (06:00 to 23:00)
+      if (isSingleShift || currentUserRole === 'warehouse_keeper') {
         const curHour = new Date().getHours();
-        return (curHour >= 6 && curHour < 21);
+        return (curHour >= 6 && curHour < 23);
       }
 
       // 3. Floor supervisor can only edit the shift matching the operational time window
@@ -5172,8 +5228,11 @@
     }
 
     function setTaskShiftStatus(rawId, shiftId, newStatus) {
-      if (!canEditShift(shiftId)) {
-        const shName = getShiftName(currentBranchId, shiftId);
+      const bSections = getBranchSections(currentBranchId, true);
+      const parentSec = bSections.find(s => (s.items || []).some(it => it.rawId === rawId));
+      const isSingle = isSectionSingleShift(parentSec, currentBranchId);
+      if (!canEditShift(shiftId, isSingle)) {
+        const shName = isSingle ? 'الوردية اليومية للمستودع' : getShiftName(currentBranchId, shiftId);
         showToast(`🔒 عذراً، (${shName}) مخصصة لمشرفها وللاطلاع فقط. لا يمكن التعديل إلا خلال توقيتها المعتمد أو بحساب الإدارة.`);
         return;
       }
@@ -5214,8 +5273,9 @@
     }
 
     function setShiftTemperature(tempName, shiftId, value) {
-      if (!canEditShift(shiftId)) {
-        const shName = getShiftName(currentBranchId, shiftId);
+      const isWhTemp = tempName.includes('Warehouse') || tempName.includes('المستودع') || tempName.includes('المخزن');
+      if (!canEditShift(shiftId, isWhTemp)) {
+        const shName = isWhTemp ? 'الوردية اليومية للمستودع' : getShiftName(currentBranchId, shiftId);
         showToast(`🔒 عذراً، تسجيل حرارة (${shName}) مخصص لمشرف تلك الوردية فقط أو للإدارة.`);
         renderSections();
         return;
