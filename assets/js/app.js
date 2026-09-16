@@ -2576,7 +2576,117 @@
       showToast("🔒 تم قفل الجلسة");
     }
 
+    // ============================================================
+    // THEME ENGINE (Auto Dark Mode Adaptation & Manual Override)
+    // ============================================================
+    function getStoredThemePreference() {
+      try {
+        return localStorage.getItem('diwan_theme') || 'auto';
+      } catch (e) {
+        return 'auto';
+      }
+    }
+
+    function isSystemInDarkMode() {
+      return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+
+    function applyTheme(themeMode) {
+      const htmlEl = document.documentElement;
+      let effectiveTheme = 'light';
+
+      if (themeMode === 'dark') {
+        effectiveTheme = 'dark';
+        htmlEl.setAttribute('data-theme', 'dark');
+      } else if (themeMode === 'light') {
+        effectiveTheme = 'light';
+        htmlEl.setAttribute('data-theme', 'light');
+      } else { // 'auto'
+        const sysDark = isSystemInDarkMode();
+        effectiveTheme = sysDark ? 'dark' : 'light';
+        htmlEl.removeAttribute('data-theme');
+      }
+
+      updateThemeUI(themeMode, effectiveTheme);
+    }
+
+    function updateThemeUI(themeMode, effectiveTheme) {
+      const isDark = effectiveTheme === 'dark';
+      
+      // Top header toggle button
+      const headerBtn = document.getElementById('themeToggleBtn');
+      const headerIcon = document.getElementById('themeToggleIcon');
+      const headerText = document.getElementById('themeToggleText');
+      if (headerBtn) {
+        headerBtn.title = themeMode === 'auto' 
+          ? 'المظهر: تلقائي (حسب الهاتف) - اضغط للتبديل' 
+          : (themeMode === 'dark' ? 'المظهر: ليلي 🌙 - اضغط للتبديل' : 'المظهر: نهاري ☀️ - اضغط للتبديل');
+      }
+      if (headerIcon) {
+        headerIcon.textContent = themeMode === 'auto' ? (isDark ? '🌓' : '🌤️') : (themeMode === 'dark' ? '🌙' : '☀️');
+      }
+      if (headerText) {
+        headerText.textContent = themeMode === 'auto' ? (isDark ? 'ليلي (تلقائي)' : 'نهاري (تلقائي)') : (themeMode === 'dark' ? 'ليلي' : 'نهاري');
+      }
+
+      // Auth lock screen toggle button
+      const authIcon = document.getElementById('authThemeToggleIcon');
+      const authText = document.getElementById('authThemeToggleText');
+      if (authIcon) {
+        authIcon.textContent = themeMode === 'auto' ? (isDark ? '🌓' : '🌤️') : (themeMode === 'dark' ? '🌙' : '☀️');
+      }
+      if (authText) {
+        authText.textContent = themeMode === 'auto' ? (isDark ? 'المظهر: ليلي (الهاتف)' : 'المظهر: نهاري (الهاتف)') : (themeMode === 'dark' ? 'المظهر: ليلي 🌙' : 'المظهر: نهاري ☀️');
+      }
+    }
+
+    function setTheme(themeMode) {
+      try {
+        if (themeMode === 'auto') {
+          localStorage.removeItem('diwan_theme');
+        } else {
+          localStorage.setItem('diwan_theme', themeMode);
+        }
+      } catch (e) {}
+      applyTheme(themeMode);
+    }
+
+    function toggleTheme() {
+      const currentPref = getStoredThemePreference();
+      let nextPref = 'auto';
+      if (currentPref === 'auto') {
+        nextPref = isSystemInDarkMode() ? 'light' : 'dark';
+      } else if (currentPref === 'dark') {
+        nextPref = 'light';
+      } else {
+        nextPref = 'auto';
+      }
+      setTheme(nextPref);
+      showToast(nextPref === 'auto' ? '🌓 تم ضبط المظهر تلقائياً حسب وضع الهاتف' : (nextPref === 'dark' ? '🌙 تم تفعيل الوضع الليلي' : '☀️ تم تفعيل الوضع النهاري'));
+    }
+
+    function initThemeEngine() {
+      const initialPref = getStoredThemePreference();
+      applyTheme(initialPref);
+
+      // Listen to OS-level dark mode changes dynamically
+      if (window.matchMedia) {
+        const mediaDark = window.matchMedia('(prefers-color-scheme: dark)');
+        const listener = () => {
+          if (getStoredThemePreference() === 'auto') {
+            applyTheme('auto');
+          }
+        };
+        if (typeof mediaDark.addEventListener === 'function') {
+          mediaDark.addEventListener('change', listener);
+        } else if (typeof mediaDark.addListener === 'function') {
+          mediaDark.addListener(listener);
+        }
+      }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
+      initThemeEngine();
       checkAuthOnLoad();
       document.getElementById('shiftDateInput').value = currentDate;
 
