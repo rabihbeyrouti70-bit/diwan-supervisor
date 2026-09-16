@@ -732,6 +732,20 @@
       return sections.reduce((acc, sec) => acc + (sec.items ? sec.items.length : 0), 0);
     }
 
+    function getBranchFloorTotalItems(branchId) {
+      const sections = getBranchSections(branchId || currentBranchId, false);
+      return sections
+        .filter(sec => !isWarehouseSection(sec) && sec.targetRole !== 'warehouse')
+        .reduce((acc, sec) => acc + (sec.items ? sec.items.length : 0), 0);
+    }
+
+    function getBranchWarehouseTotalItems(branchId) {
+      const sections = getBranchSections(branchId || currentBranchId, false);
+      return sections
+        .filter(sec => isWarehouseSection(sec) || sec.targetRole === 'warehouse')
+        .reduce((acc, sec) => acc + (sec.items ? sec.items.length : 0), 0);
+    }
+
     Object.defineProperty(window, 'TOTAL_ITEMS', {
       get: function() {
         return getBranchTotalItems(currentBranchId);
@@ -1206,20 +1220,29 @@
       const targetItems = optionalItems || (state && state.items) || {};
       const bId = branchId || currentBranchId;
       const sections = getBranchSections(bId, false);
+      const isWarehouseTarget = (shiftId === 'warehouse' || shiftId === 'warehouse_daily');
       
       sections.forEach(sec => {
         if (!sec.items) return;
-        const isSingleShift = isSectionSingleShift(sec, bId);
+        const isWh = isWarehouseSection(sec) || sec.targetRole === 'warehouse' || isSectionSingleShift(sec, bId);
+
+        // Scope isolation for fair percentage evaluation:
+        // Warehouse calculations evaluate warehouse sections only
+        if (isWarehouseTarget && !isWh) return;
+        // Floor shift calculations evaluate floor sections only
+        if (!isWarehouseTarget && isWh) return;
+
         sec.items.forEach(itDef => {
           const it = targetItems[itDef.rawId];
           if (!it) return;
-          let shData = it[shiftId] || (typeof it.status === 'string' && (shiftId === currentShiftType) ? it : null);
-          if (isSingleShift && (!shData || !shData.status || shData.status === 'pending')) {
-            const dailySh = it['morning'] || it['evening'] || it['night'];
-            if (dailySh && dailySh.status && dailySh.status !== 'pending') {
-              shData = dailySh;
-            }
+          
+          let shData = null;
+          if (isWarehouseTarget) {
+            shData = it['morning'] || it['evening'] || it['night'] || (typeof it.status === 'string' ? it : null);
+          } else {
+            shData = it[shiftId] || (typeof it.status === 'string' && (shiftId === currentShiftType) ? it : null);
           }
+
           if (!shData) return;
           if (shData.status === 'done') done++;
           else if (shData.status === 'in_progress') inProgress++;
@@ -1227,37 +1250,52 @@
           else if (shData.status === 'handover') handover++;
         });
       });
-      const total = getBranchTotalItems(bId);
+
+      const total = isWarehouseTarget ? getBranchWarehouseTotalItems(bId) : getBranchFloorTotalItems(bId);
       const pending = Math.max(0, total - done - inProgress - critical - handover);
       const percentage = total > 0 ? Math.round((done / total) * 100) : 0;
-      return { done, inProgress, critical, handover, pending, total, percentage };
+      return { done, inProgress, critical, handover, pending, total, percentage, isWarehouseTarget };
+    }
+
+    function calculateBranchOverallStats(optionalItems, branchId) {
+      const bId = branchId || currentBranchId;
+      const branchShifts = getBranchShifts(bId);
+      
+      let floorTotalDuties = getBranchFloorTotalItems(bId) * branchShifts.length;
+      let floorDoneDuties = 0;
+      let floorProgressDuties = 0;
+      let floorCriticalDuties = 0;
+      let floorHandoverDuties = 0;
+
+      branchShifts.forEach(sh => {
+        const s = calculateShiftStats(sh.id, optionalItems, bId);
+        floorDoneDuties += s.done;
+        floorProgressDuties += s.inProgress;
+        floorCriticalDuties += s.critical;
+        floorHandoverDuties += s.handover;
+      });
+
+      const whStats = calculateShiftStats('warehouse_daily', optionalItems, bId);
+      const whTotal = getBranchWarehouseTotalItems(bId);
+      const whDone = whStats.done;
+
+      const total = floorTotalDuties + whTotal;
+      const done = floorDoneDuties + whDone;
+      const inProgress = floorProgressDuties + whStats.inProgress;
+      const critical = floorCriticalDuties + whStats.critical;
+      const handover = floorHandoverDuties + whStats.handover;
+      const pending = Math.max(0, total - done - inProgress - critical - handover);
+      const percentage = total > 0 ? Math.round((done / total) * 100) : 0;
+
+      return { done, inProgress, critical, handover, pending, total, percentage, floorDoneDuties, floorTotalDuties, whDone, whTotal };
     }
 
     function calculateStats(itemsState, targetShift) {
       const sh = targetShift || ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
-      if (itemsState && typeof itemsState === 'object') {
-        let done = 0, inProgress = 0, handover = 0, critical = 0;
-        let isMatrix = false;
-        Object.values(itemsState).forEach(it => {
-          if (!it) return;
-          if (it.morning || it.evening || it.night) {
-            isMatrix = true;
-          } else {
-            if (it.status === 'done') done++;
-            else if (it.status === 'in_progress') inProgress++;
-            else if (it.status === 'handover') handover++;
-            else if (it.status === 'critical') critical++;
-          }
-        });
-        if (isMatrix) {
-          return calculateShiftStats(sh, itemsState);
-        }
-        const total = TOTAL_ITEMS;
-        const pending = Math.max(0, total - done - inProgress - handover - critical);
-        const percentage = total > 0 ? Math.round((done / total) * 100) : 0;
-        return { done, inProgress, handover, critical, pending, total, percentage };
+      if (sh === 'all') {
+        return calculateBranchOverallStats(itemsState);
       }
-      return calculateShiftStats(sh);
+      return calculateShiftStats(sh, itemsState);
     }
 
 
@@ -4649,20 +4687,42 @@
       const currentBranchSections = allBranchSections.filter(sec => {
         const isWh = isWarehouseSection(sec);
         const secRole = sec.targetRole || (isWh ? 'warehouse' : 'floor');
+        const isSingleShift = isSectionSingleShift(sec, currentBranchId);
+
+        // 1. Dedicated roles
         if (currentUserRole === 'warehouse_keeper') {
-          return secRole === 'warehouse' || secRole === 'all';
+          return secRole === 'warehouse' || isWh || secRole === 'all';
         }
         if (currentUserRole === 'supervisor') {
-          return secRole === 'floor' || secRole === 'all';
+          return (!isWh && secRole !== 'warehouse') || secRole === 'all';
         }
-        // Managers (admin / branch_manager)
+
+        // 2. Operational Scopes (Manager explicit filter pills)
         if (activeOperationalScope === 'warehouse') {
-          return secRole === 'warehouse' || secRole === 'all';
+          return isWh || secRole === 'warehouse' || secRole === 'all';
         }
         if (activeOperationalScope === 'floor') {
-          return secRole === 'floor' || secRole === 'all';
+          return (!isWh && secRole !== 'warehouse') || secRole === 'all';
         }
-        return true; // 'all' scope shows all sections
+
+        // 3. Tab views in Master View ('all' scope):
+        if (activeShiftView === 'warehouse_daily') {
+          return isWh || secRole === 'warehouse';
+        }
+        if (activeShiftView === 'evening' || activeShiftView === 'night') {
+          // Floor evening/night tabs: strictly exclude warehouse daytime tasks
+          if (isWh || secRole === 'warehouse' || isSingleShift) {
+            return false;
+          }
+        }
+        if (activeShiftView === 'morning') {
+          // Floor morning tab: warehouse has its own dedicated tab
+          if (isWh || secRole === 'warehouse') {
+            return false;
+          }
+        }
+
+        return true; // 'all' matrix view shows all branch sections
       });
 
       if (currentBranchSections.length === 0) {
@@ -5164,11 +5224,79 @@
         card.appendChild(body);
         container.appendChild(card);
       });
+
+      // Informative notice for Evening / Night shifts regarding Warehouse
+      const hasWarehouseSections = getBranchWarehouseTotalItems(currentBranchId) > 0;
+      if (hasWarehouseSections && (activeShiftView === 'evening' || activeShiftView === 'night')) {
+        const whStats = calculateShiftStats('warehouse_daily');
+        const whKeeper = getActiveWarehouseKeepersDisplay();
+        const noticeDiv = document.createElement('div');
+        noticeDiv.className = 'warehouse-evening-notice';
+        noticeDiv.style.cssText = 'background: #fffbeb; border: 1.5px solid #fde68a; border-radius: 12px; padding: 14px 18px; margin: 20px 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; box-shadow: 0 1px 3px rgba(0,0,0,0.05);';
+        noticeDiv.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 24px;">📦</span>
+            <div>
+              <div style="font-weight: 800; font-size: 13.5px; color: #92400e; margin-bottom: 2px;">
+                قسم المستودع والمخازن (دوام نهاري موحد)
+              </div>
+              <div style="font-size: 12px; color: #b45309;">
+                يعمل المستودع بنظام وردية نهارية واحدة. نسبة إنجازه الحالية: <strong style="color: ${whStats.percentage === 100 ? '#059669' : '#b45309'}; font-size: 13px;">${whStats.percentage}%</strong> (${whStats.done}/${whStats.total} مهام) - المسؤول: <strong>${escapeHtml(whKeeper)}</strong>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn-slot-pill" onclick="setShiftViewMode('warehouse_daily')" style="background: #f59e0b; color: white; border: none; font-weight: 700; padding: 6px 14px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;" title="فتح ورقة فحص المستودع اليومية">
+            <span>📦 فتح ورقة المستودع</span>
+          </button>
+        `;
+        container.appendChild(noticeDiv);
+      }
+
       updateToggleAllButton();
+    }
+
+    function getActiveWarehouseKeepersDisplay(branchId) {
+      const bId = branchId || currentBranchId;
+      const whKeepers = new Set();
+      const bSections = getBranchSections(bId, false);
+      bSections.filter(s => isWarehouseSection(s) || s.targetRole === 'warehouse').forEach(sec => {
+        (sec.items || []).forEach(it => {
+          const entry = state.items[it.rawId];
+          if (entry) {
+            const d = entry['morning'] || entry['evening'] || entry['night'] || (typeof entry.status === 'string' ? entry : null);
+            if (d && d.updatedBy && d.status !== 'pending') whKeepers.add(d.updatedBy);
+          }
+        });
+      });
+      return whKeepers.size > 0 ? Array.from(whKeepers).join('، ') : 'أمين المستودع';
+    }
+
+    function getActiveSupervisorsDisplayForShift(shiftId, branchId) {
+      const bId = branchId || currentBranchId;
+      const supsSet = new Set();
+      const bSections = getBranchSections(bId, false);
+      const floorSections = bSections.filter(s => !isWarehouseSection(s) && s.targetRole !== 'warehouse');
+      const floorRawIds = new Set();
+      floorSections.forEach(sec => (sec.items || []).forEach(it => floorRawIds.add(it.rawId)));
+
+      Object.entries(state.items).forEach(([rawId, it]) => {
+        if (floorRawIds.has(rawId) && it && it[shiftId] && it[shiftId].updatedBy && it[shiftId].status !== 'pending') {
+          supsSet.add(it[shiftId].updatedBy);
+        }
+      });
+      Object.values(state.temperatures).forEach(tp => {
+        if (tp && tp[shiftId] && tp[shiftId].updatedBy && tp[shiftId].value) {
+          supsSet.add(tp[shiftId].updatedBy);
+        }
+      });
+
+      const sups = Array.from(supsSet);
+      return sups.length > 0 ? sups.join('، ') : 'لم تبدأ بعد';
     }
 
     /* ============================================================
        MULTI-SHIFT CONTINUOUS OPERATIONS MATRIX CONTROLLERS (V4.0)
+       Hybrid Categorized Tabs System (Floor Multi-Shift + Warehouse Single-Shift)
        ============================================================ */
     function renderExcelSheetTabs() {
       const track = document.getElementById('excelTabsTrack');
@@ -5181,28 +5309,16 @@
         badge.innerText = `${b ? b.nameAr : currentBranchId} | ${currentDate}`;
       }
 
+      // 1. Warehouse-only scope or warehouse keeper role
       if (activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper') {
-        const stats = calculateShiftStats('morning');
+        const stats = calculateShiftStats('warehouse_daily');
         const pctColor = stats.percentage === 100 ? '#059669' : (stats.percentage > 0 ? '#0284c7' : '#64748b');
-
-        // Determine active warehouse keepers
-        const whKeepers = new Set();
-        const bSections = getBranchSections(currentBranchId, false);
-        bSections.filter(s => isWarehouseSection(s)).forEach(sec => {
-          (sec.items || []).forEach(it => {
-            const entry = state.items[it.rawId];
-            if (entry) {
-              const d = entry['morning'] || entry['evening'] || entry['night'];
-              if (d && d.updatedBy && d.status !== 'pending') whKeepers.add(d.updatedBy);
-            }
-          });
-        });
-        const keeperDisplay = whKeepers.size > 0 ? Array.from(whKeepers).join('، ') : 'أمين المستودع';
+        const keeperDisplay = getActiveWarehouseKeepersDisplay();
 
         track.innerHTML = `
-          <div class="excel-sheet-tab active" data-mode="all" onclick="setShiftViewMode('all')" title="الوردية اليومية الموحدة للمستودع (كامل اليوم)">
-            <span class="excel-tab-icon">☀️</span>
-            <span class="excel-tab-name">الوردية اليومية للمستودع (كامل اليوم)</span>
+          <div class="excel-sheet-tab active" data-mode="warehouse_daily" onclick="setShiftViewMode('warehouse_daily')" title="الوردية اليومية الموحدة للمستودع (كامل اليوم)">
+            <span class="excel-tab-icon">📦</span>
+            <span class="excel-tab-name">المستودع: الوردية اليومية (كامل اليوم)</span>
             <span class="excel-tab-sup" title="المسؤول: ${escapeHtml(keeperDisplay)}">👤 ${escapeHtml(keeperDisplay)}</span>
             <span class="excel-tab-pct" style="color: ${pctColor}; background: ${stats.percentage === 100 ? '#ecfdf5' : '#f8fafc'}; border: 1px solid ${pctColor}40;">${stats.percentage}%</span>
           </div>
@@ -5210,48 +5326,87 @@
         return;
       }
 
-      // Master Tab: All Shifts Matrix Sheet
+      // 2. Floor-only scope or floor supervisor role
+      if (activeOperationalScope === 'floor' || currentUserRole === 'supervisor') {
+        const isAllActive = (activeShiftView === 'all');
+        let tabsHtml = `
+          <div class="excel-sheet-tab ${isAllActive ? 'active' : ''}" data-mode="all" onclick="setShiftViewMode('all')" title="عرض مقارنة كافة ورديات الصالة">
+            <span class="excel-tab-icon">🌐</span>
+            <span class="excel-tab-name">مقارنة ورديات الصالة</span>
+            <span class="excel-tab-badge-all">صالة</span>
+          </div>
+        `;
+
+        branchShifts.forEach(shift => {
+          const isActive = (activeShiftView === shift.id);
+          const stats = calculateShiftStats(shift.id);
+          const shiftIcon = shift.id === 'morning' ? '☀️' : (shift.id === 'evening' ? '🌆' : '🌙');
+          const supDisplay = getActiveSupervisorsDisplayForShift(shift.id);
+          const pctColor = stats.percentage === 100 ? '#059669' : (stats.percentage > 0 ? '#0284c7' : '#64748b');
+
+          tabsHtml += `
+            <div class="excel-sheet-tab ${isActive ? 'active' : ''}" data-mode="${shift.id}" onclick="setShiftViewMode('${shift.id}')" title="${escapeHtml(shift.nameAr)}">
+              <span class="excel-tab-icon">${shiftIcon}</span>
+              <span class="excel-tab-name">${escapeHtml(shift.nameAr)}</span>
+              <span class="excel-tab-sup" title="المشرف: ${escapeHtml(supDisplay)}">👤 ${escapeHtml(supDisplay)}</span>
+              <span class="excel-tab-pct" style="color: ${pctColor}; background: ${stats.percentage === 100 ? '#ecfdf5' : '#f8fafc'}; border: 1px solid ${pctColor}40;">${stats.percentage}%</span>
+            </div>
+          `;
+        });
+
+        track.innerHTML = tabsHtml;
+        return;
+      }
+
+      // 3. MASTER HYBRID CATEGORIZED TABS (When activeOperationalScope === 'all' for managers)
       const isAllActive = (activeShiftView === 'all');
+      const overallStats = calculateBranchOverallStats();
+      const overallPctColor = overallStats.percentage === 100 ? '#059669' : (overallStats.percentage > 0 ? '#0284c7' : '#64748b');
+
       let tabsHtml = `
-        <div class="excel-sheet-tab ${isAllActive ? 'active' : ''}" data-mode="all" onclick="setShiftViewMode('all')" title="عرض مقارنة شاملة لكافة ورديات اليوم">
+        <div class="excel-sheet-tab ${isAllActive ? 'active' : ''}" data-mode="all" onclick="setShiftViewMode('all')" title="مقارنة شاملة لكافة عمليات وورديات الصالة والمستودع">
           <span class="excel-tab-icon">🌐</span>
-          <span class="excel-tab-name">مقارنة كافة الورديات (اليوم كاملاً)</span>
+          <span class="excel-tab-name">مقارنة شاملة للفرع (اليوم كاملاً)</span>
           <span class="excel-tab-badge-all">شاملة</span>
+          <span class="excel-tab-pct" style="color: ${overallPctColor}; background: ${overallStats.percentage === 100 ? '#ecfdf5' : '#f8fafc'}; border: 1px solid ${overallPctColor}40;">${overallStats.percentage}%</span>
         </div>
       `;
 
-      // Individual Shift Tabs
+      // Floor Shifts (Categorized with "الصالة" badge)
       branchShifts.forEach(shift => {
         const isActive = (activeShiftView === shift.id);
         const stats = calculateShiftStats(shift.id);
         const shiftIcon = shift.id === 'morning' ? '☀️' : (shift.id === 'evening' ? '🌆' : '🌙');
-
-        // Determine active supervisors for this shift
-        const supsSet = new Set();
-        Object.values(state.items).forEach(it => {
-          if (it && it[shift.id] && it[shift.id].updatedBy && it[shift.id].status !== 'pending') {
-            supsSet.add(it[shift.id].updatedBy);
-          }
-        });
-        Object.values(state.temperatures).forEach(tp => {
-          if (tp && tp[shift.id] && tp[shift.id].updatedBy && tp[shift.id].value) {
-            supsSet.add(tp[shift.id].updatedBy);
-          }
-        });
-
-        const sups = Array.from(supsSet);
-        const supDisplay = sups.length > 0 ? sups.join('، ') : 'لم تبدأ بعد';
+        const supDisplay = getActiveSupervisorsDisplayForShift(shift.id);
         const pctColor = stats.percentage === 100 ? '#059669' : (stats.percentage > 0 ? '#0284c7' : '#64748b');
 
         tabsHtml += `
-          <div class="excel-sheet-tab ${isActive ? 'active' : ''}" data-mode="${shift.id}" onclick="setShiftViewMode('${shift.id}')" title="${escapeHtml(shift.nameAr)}">
+          <div class="excel-sheet-tab ${isActive ? 'active' : ''}" data-mode="${shift.id}" onclick="setShiftViewMode('${shift.id}')" title="صالة الفرع: ${escapeHtml(shift.nameAr)}">
             <span class="excel-tab-icon">${shiftIcon}</span>
-            <span class="excel-tab-name">${escapeHtml(shift.nameAr)}</span>
+            <span class="excel-tab-name"><span style="background: rgba(37,99,235,0.12); color: #2563eb; padding: 1px 5px; border-radius: 4px; font-size: 10px; margin-inline-end: 4px; font-weight: 800;">الصالة</span>${escapeHtml(shift.nameAr)}</span>
             <span class="excel-tab-sup" title="المشرف: ${escapeHtml(supDisplay)}">👤 ${escapeHtml(supDisplay)}</span>
             <span class="excel-tab-pct" style="color: ${pctColor}; background: ${stats.percentage === 100 ? '#ecfdf5' : '#f8fafc'}; border: 1px solid ${pctColor}40;">${stats.percentage}%</span>
           </div>
         `;
       });
+
+      // Warehouse Single Daily Shift Tab (Categorized with "المستودع" badge)
+      const hasWarehouseSections = getBranchWarehouseTotalItems(currentBranchId) > 0;
+      if (hasWarehouseSections) {
+        const isWhActive = (activeShiftView === 'warehouse_daily');
+        const whStats = calculateShiftStats('warehouse_daily');
+        const whPctColor = whStats.percentage === 100 ? '#059669' : (whStats.percentage > 0 ? '#0284c7' : '#64748b');
+        const keeperDisplay = getActiveWarehouseKeepersDisplay();
+
+        tabsHtml += `
+          <div class="excel-sheet-tab ${isWhActive ? 'active' : ''}" data-mode="warehouse_daily" onclick="setShiftViewMode('warehouse_daily')" title="المستودع والمخازن: وردية يومية واحدة (كامل اليوم)">
+            <span class="excel-tab-icon">📦</span>
+            <span class="excel-tab-name"><span style="background: rgba(217,119,6,0.15); color: #d97706; padding: 1px 5px; border-radius: 4px; font-size: 10px; margin-inline-end: 4px; font-weight: 800;">المستودع</span>دوام نهاري كامل</span>
+            <span class="excel-tab-sup" title="المسؤول: ${escapeHtml(keeperDisplay)}">👤 ${escapeHtml(keeperDisplay)}</span>
+            <span class="excel-tab-pct" style="color: ${whPctColor}; background: ${whStats.percentage === 100 ? '#ecfdf5' : '#f8fafc'}; border: 1px solid ${whPctColor}40;">${whStats.percentage}%</span>
+          </div>
+        `;
+      }
 
       track.innerHTML = tabsHtml;
     }
@@ -5265,12 +5420,10 @@
 
     function setShiftViewMode(mode, btn) {
       activeShiftView = mode;
-      if (mode !== 'all') {
+      if (mode !== 'all' && mode !== 'warehouse_daily') {
         currentShiftType = mode;
         const sel = document.getElementById('shiftTypeSelect');
         if (sel) sel.value = mode;
-        const badge = document.getElementById('activeShiftBadge');
-        if (badge) badge.innerText = getShiftName(currentBranchId, mode);
       }
       document.querySelectorAll('.shift-tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.excel-sheet-tab').forEach(b => b.classList.remove('active'));
@@ -5283,10 +5436,12 @@
 
       const badge = document.getElementById('activeShiftBadge');
       if (badge) {
-        if (activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper') {
-          badge.innerText = '☀️ الوردية اليومية (كامل اليوم)';
+        if (mode === 'warehouse_daily' || activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper') {
+          badge.innerText = 'الوردية المفتوحة: 📦 المستودع - دوام نهاري كامل';
+        } else if (mode === 'all') {
+          badge.innerText = (activeOperationalScope === 'floor') ? 'مقارنة ورديات الصالة' : 'مقارنة كافة الورديات (شاملة)';
         } else {
-          badge.innerText = (mode === 'all') ? 'مقارنة كافة الورديات' : getShiftName(currentBranchId, mode);
+          badge.innerText = 'الوردية المفتوحة: 🛒 صالة الفرع - ' + getShiftName(currentBranchId, mode);
         }
       }
       renderAll();
@@ -5307,7 +5462,7 @@
       }
 
       // 2. Warehouse Keepers or single-shift warehouse tasks: daytime operational window (06:00 to 23:00)
-      if (isSingleShift || currentUserRole === 'warehouse_keeper') {
+      if (isSingleShift || currentUserRole === 'warehouse_keeper' || shiftId === 'warehouse_daily') {
         const curHour = new Date().getHours();
         return (curHour >= 6 && curHour < 23);
       }
@@ -5367,7 +5522,10 @@
     }
 
     function setTaskShiftNote(rawId, shiftId, noteText) {
-      if (!canEditShift(shiftId)) {
+      const bSections = getBranchSections(currentBranchId, true);
+      const parentSec = bSections.find(s => (s.items || []).some(it => it.rawId === rawId));
+      const isSingle = isSectionSingleShift(parentSec, currentBranchId);
+      if (!canEditShift(shiftId, isSingle)) {
         showToast('🔒 لا يمكن تعديل ملاحظات وردية أخرى.');
         renderSections();
         return;
@@ -5412,55 +5570,81 @@
       const container = document.getElementById('dailyShiftScoreboard');
       if (!container) return;
       const branchShifts = getBranchShifts(currentBranchId);
+      const hasWarehouseSections = getBranchWarehouseTotalItems(currentBranchId) > 0;
+      let cardsHtml = '';
 
-      container.innerHTML = branchShifts.map(shift => {
-        const stats = calculateShiftStats(shift.id);
-        const isActive = (shift.id === currentShiftType);
-        
-        // Determine active supervisors for this shift
-        const supsSet = new Set();
-        Object.values(state.items).forEach(it => {
-          if (it && it[shift.id] && it[shift.id].updatedBy && it[shift.id].status !== 'pending') {
-            supsSet.add(it[shift.id].updatedBy);
-          }
-        });
-        Object.values(state.temperatures).forEach(tp => {
-          if (tp && tp[shift.id] && tp[shift.id].updatedBy && tp[shift.id].value) {
-            supsSet.add(tp[shift.id].updatedBy);
-          }
-        });
+      // 1. Floor Shifts Cards (Shown for Floor Supervisors, Managers, and All Scope)
+      if (currentUserRole !== 'warehouse_keeper' && activeOperationalScope !== 'warehouse') {
+        cardsHtml += branchShifts.map(shift => {
+          const stats = calculateShiftStats(shift.id);
+          const isActive = (shift.id === activeShiftView);
+          const supDisplay = getActiveSupervisorsDisplayForShift(shift.id);
+          const shiftIcon = shift.id === 'morning' ? '☀️' : (shift.id === 'evening' ? '🌆' : '🌙');
 
-        const sups = Array.from(supsSet);
-        const supDisplay = sups.length > 0 ? sups.join('، ') : 'لم يبدأ بعد';
-        const shiftIcon = shift.id === 'morning' ? '☀️' : (shift.id === 'evening' ? '🌆' : '🌙');
+          return `
+            <div class="score-card ${isActive ? 'active-shift-card' : ''}" onclick="setShiftViewMode('${shift.id}')" style="cursor: pointer;" title="صالة الفرع: ${escapeHtml(shift.nameAr)}">
+              <div class="score-card-header">
+                <div class="score-shift-title">
+                  <span>${shiftIcon}</span>
+                  <span><span style="background: rgba(37,99,235,0.12); color: #2563eb; padding: 1px 5px; border-radius: 4px; font-size: 10px; margin-inline-end: 4px; font-weight: 800;">الصالة</span>${escapeHtml(shift.nameAr)}</span>
+                  ${isActive ? '<span style="background: #ecfdf5; color: #059669; font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 800; border: 1px solid #a7f3d0;">المعروضة</span>' : ''}
+                </div>
+                <span class="score-stat-pill" style="color: ${stats.percentage === 100 ? '#059669' : 'var(--secondary)'};">${stats.percentage}%</span>
+              </div>
+              <div style="background: #e2e8f0; border-radius: 999px; height: 6px; overflow: hidden; margin-bottom: 8px;">
+                <div style="background: ${stats.critical > 0 ? 'var(--danger)' : 'var(--primary)'}; width: ${stats.percentage}%; height: 100%; transition: width 0.3s ease;"></div>
+              </div>
+              <div class="score-card-body">
+                <div>
+                  <span style="font-size: 11px; color: var(--text-muted); display: block;">المشرف المسؤول:</span>
+                  <span class="score-sup-name">${escapeHtml(supDisplay)}</span>
+                </div>
+                <div style="text-align: left; font-size: 11.5px; font-weight: 700;">
+                  <span style="color: var(--primary);">✅ ${stats.done}/${stats.total}</span>
+                  ${stats.critical > 0 ? `<span style="color: var(--danger); margin-right: 6px;">🚨 ${stats.critical}</span>` : ''}
+                  <span style="color: var(--text-muted); margin-right: 6px;">⏳ ${stats.pending}</span>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
 
-        return `
-          <div class="score-card ${isActive ? 'active-shift-card' : ''}" onclick="setShiftViewMode('${shift.id}')" style="cursor: pointer;" title="انقر للتركيز على هذه الوردية">
+      // 2. Warehouse Single Daily Shift Card (Shown for Warehouse Keepers, Managers, and All Scope)
+      if (hasWarehouseSections && (activeOperationalScope === 'all' || activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper')) {
+        const whStats = calculateShiftStats('warehouse_daily');
+        const isWhActive = (activeShiftView === 'warehouse_daily');
+        const keeperDisplay = getActiveWarehouseKeepersDisplay();
+
+        cardsHtml += `
+          <div class="score-card ${isWhActive ? 'active-shift-card' : ''}" onclick="setShiftViewMode('warehouse_daily')" style="cursor: pointer;" title="المستودع والمخازن: دوام نهاري كامل">
             <div class="score-card-header">
               <div class="score-shift-title">
-                <span>${shiftIcon}</span>
-                <span>${escapeHtml(shift.nameAr)}</span>
-                ${isActive ? '<span style="background: #ecfdf5; color: #059669; font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 800; border: 1px solid #a7f3d0;">تسجيلك الحالي</span>' : ''}
+                <span>📦</span>
+                <span><span style="background: rgba(217,119,6,0.15); color: #d97706; padding: 1px 5px; border-radius: 4px; font-size: 10px; margin-inline-end: 4px; font-weight: 800;">المستودع</span>دوام نهاري كامل</span>
+                ${isWhActive ? '<span style="background: #fef3c7; color: #92400e; font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 800; border: 1px solid #fde68a;">المعروضة</span>' : ''}
               </div>
-              <span class="score-stat-pill" style="color: ${stats.percentage === 100 ? '#059669' : 'var(--secondary)'};">${stats.percentage}%</span>
+              <span class="score-stat-pill" style="color: ${whStats.percentage === 100 ? '#059669' : '#d97706'};">${whStats.percentage}%</span>
             </div>
             <div style="background: #e2e8f0; border-radius: 999px; height: 6px; overflow: hidden; margin-bottom: 8px;">
-              <div style="background: ${stats.critical > 0 ? 'var(--danger)' : 'var(--primary)'}; width: ${stats.percentage}%; height: 100%; transition: width 0.3s ease;"></div>
+              <div style="background: ${whStats.critical > 0 ? 'var(--danger)' : '#f59e0b'}; width: ${whStats.percentage}%; height: 100%; transition: width 0.3s ease;"></div>
             </div>
             <div class="score-card-body">
               <div>
-                <span style="font-size: 11px; color: var(--text-muted); display: block;">المشرف المسؤول:</span>
-                <span class="score-sup-name">${escapeHtml(supDisplay)}</span>
+                <span style="font-size: 11px; color: var(--text-muted); display: block;">أمين المستودع:</span>
+                <span class="score-sup-name">${escapeHtml(keeperDisplay)}</span>
               </div>
               <div style="text-align: left; font-size: 11.5px; font-weight: 700;">
-                <span style="color: var(--primary);">✅ ${stats.done}</span>
-                ${stats.critical > 0 ? `<span style="color: var(--danger); margin-right: 6px;">🚨 ${stats.critical}</span>` : ''}
-                <span style="color: var(--text-muted); margin-right: 6px;">⏳ ${stats.pending}</span>
+                <span style="color: #d97706;">✅ ${whStats.done}/${whStats.total}</span>
+                ${whStats.critical > 0 ? `<span style="color: var(--danger); margin-right: 6px;">🚨 ${whStats.critical}</span>` : ''}
+                <span style="color: var(--text-muted); margin-right: 6px;">⏳ ${whStats.pending}</span>
               </div>
             </div>
           </div>
         `;
-      }).join('');
+      }
+
+      container.innerHTML = cardsHtml;
     }
 
     /* ============================================================
@@ -5648,8 +5832,23 @@
        STATS & FILTERS
        ============================================================ */
     function updateStats() {
-      const targetShift = (activeShiftView === 'all') ? currentShiftType : activeShiftView;
-      const s = calculateShiftStats(targetShift);
+      let s;
+      let titleText = '📊 نسبة الإنجاز العام للوردية';
+
+      if (activeShiftView === 'warehouse_daily' || activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper') {
+        s = calculateShiftStats('warehouse_daily');
+        titleText = '📦 نسبة إنجاز المستودع والمخازن (دوام نهاري كامل)';
+      } else if (activeShiftView === 'all') {
+        s = calculateBranchOverallStats();
+        titleText = '🌐 مؤشر الإنجاز الكلي للفرع (الصالة والمستودع)';
+      } else {
+        s = calculateShiftStats(activeShiftView);
+        const shName = getShiftName(currentBranchId, activeShiftView);
+        titleText = `🛒 نسبة إنجاز صالة الفرع (${shName})`;
+      }
+
+      const pTitle = document.querySelector('.progress-title');
+      if (pTitle) pTitle.innerText = titleText;
 
       document.getElementById('statDone').innerText = s.done;
       document.getElementById('statProgress').innerText = s.inProgress;
