@@ -474,6 +474,35 @@
     "note": "Warehouse & Receiving"
   }
 ];
+
+    function isWarehouseSection(sec) {
+      if (!sec) return false;
+      if (sec.targetRole === 'warehouse') return true;
+      if (sec.id === 'sec_10' || sec.id === 'sec_11' || String(sec.id).startsWith('sec_warehouse_')) return true;
+      const title = ((sec.titleAr || '') + ' ' + (sec.titleEn || '')).toLowerCase();
+      if (title.includes('مستودع') || title.includes('المخزن') || title.includes('warehouse')) return true;
+      return false;
+    }
+
+    function isSectionSingleShift(sec, branchId) {
+      if (!sec) return false;
+      if (sec.shiftMode === 'single') return true;
+      if (sec.shiftMode === 'multi') return false;
+      return isWarehouseSection(sec);
+    }
+
+    function normalizeSection(sec) {
+      if (!sec) return sec;
+      if (isWarehouseSection(sec)) {
+        if (!sec.targetRole) sec.targetRole = 'warehouse';
+        if (!sec.shiftMode) sec.shiftMode = 'single';
+      } else {
+        if (!sec.targetRole) sec.targetRole = 'floor';
+        if (!sec.shiftMode) sec.shiftMode = 'multi';
+      }
+      return sec;
+    }
+
     const TEMP_CONFIGS = {
   "Warehouse Cold Storage 1": {
     "min": 0,
@@ -679,6 +708,7 @@
       if (!Array.isArray(sections) || sections.length === 0) {
         sections = DEFAULT_SECTIONS_DATA;
       }
+      sections.forEach(normalizeSection);
       if (!includeDisabled) {
         return sections.filter(sec => !sec.disabled);
       }
@@ -882,16 +912,19 @@
         const tempCount = sec.temps ? sec.temps.length : 0;
         const icon = sec.icon || (idx === 0 ? '🚗' : idx === 1 ? '🚪' : idx === 2 ? '🛒' : idx === 3 ? '💳' : idx === 4 ? '🥖' : idx === 5 ? '🧀' : idx === 6 ? '🥩' : idx === 7 ? '🍗' : idx === 8 ? '🏢' : idx === 9 ? '📦' : '📋');
         const isCustom = !!sec.isCustom || String(sec.id).startsWith('sec_custom_') || String(sec.id).startsWith('sec_fruits_') || String(sec.id).startsWith('sec_roastery') || String(sec.id).startsWith('sec_seafood') || String(sec.id).startsWith('sec_facility') || String(sec.id).startsWith('sec_warehouse_');
-        const secRole = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
-        const isSingle = (sec.shiftMode === 'single') || (secRole === 'warehouse' && sec.shiftMode !== 'multi');
+        const isWh = isWarehouseSection(sec);
+        const secRole = sec.targetRole || (isWh ? 'warehouse' : 'floor');
+        const isSingle = isSectionSingleShift(sec, branchId);
+        const bShifts = getBranchShifts(branchId);
+        const shiftCount = bShifts.length;
         const roleTag = secRole === 'warehouse'
           ? '<span style="background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #fde68a;">📦 مستودع</span>'
           : (secRole === 'all'
             ? '<span style="background: #ecfdf5; color: #065f46; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #a7f3d0;">🌐 شامل</span>'
             : '<span style="background: #f1f5f9; color: #475569; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #cbd5e1;">👤 صالة</span>');
         const shiftTag = isSingle
-          ? '<span style="background: #fffbeb; color: #b45309; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #fde68a;">☀️ وردية واحدة</span>'
-          : '<span style="background: #f0fdf4; color: #166534; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #bbf7d0;">🔄 3 ورديات</span>';
+          ? '<span style="background: #fffbeb; color: #b45309; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #fde68a;">☀️ وردية يومية واحدة</span>'
+          : `<span style="background: #f0fdf4; color: #166534; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #bbf7d0;">🔄 ${shiftCount} ورديات للصالة</span>`;
 
         return `
           <div style="background: ${isEnabled ? '#ffffff' : '#f8fafc'}; border: 1.5px solid ${isEnabled ? '#cbd5e1' : '#e2e8f0'}; border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; box-shadow: ${isEnabled ? '0 1px 3px rgba(0,0,0,0.05)' : 'none'}; opacity: ${isEnabled ? '1' : '0.75'};">
@@ -1018,12 +1051,13 @@
       
       const roleSelect = document.getElementById('inputCustomSectionRole');
       if (roleSelect) {
-        roleSelect.value = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+        const isWh = isWarehouseSection(sec);
+        roleSelect.value = sec.targetRole || (isWh ? 'warehouse' : 'floor');
       }
 
       const shiftModeSelect = document.getElementById('inputCustomSectionShiftMode');
       if (shiftModeSelect) {
-        shiftModeSelect.value = sec.shiftMode || ((sec.targetRole === 'warehouse' || sec.id === 'sec_10' || sec.id === 'sec_11') ? 'single' : 'multi');
+        shiftModeSelect.value = isSectionSingleShift(sec, branchId) ? 'single' : 'multi';
       }
 
       const itemsText = (sec.items || []).map(i => i.ar || i.en).join('\n');
@@ -1171,7 +1205,7 @@
       
       sections.forEach(sec => {
         if (!sec.items) return;
-        const isSingleShift = (sec.shiftMode === 'single') || (sec.targetRole === 'warehouse' && sec.shiftMode !== 'multi') || (sec.id === 'sec_10' || sec.id === 'sec_11');
+        const isSingleShift = isSectionSingleShift(sec, bId);
         sec.items.forEach(itDef => {
           const it = targetItems[itDef.rawId];
           if (!it) return;
@@ -4480,7 +4514,8 @@
 
       const allBranchSections = getBranchSections(currentBranchId, false);
       const currentBranchSections = allBranchSections.filter(sec => {
-        const secRole = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+        const isWh = isWarehouseSection(sec);
+        const secRole = sec.targetRole || (isWh ? 'warehouse' : 'floor');
         if (currentUserRole === 'warehouse_keeper') {
           return secRole === 'warehouse' || secRole === 'all';
         }
@@ -4510,13 +4545,14 @@
       }
 
       currentBranchSections.forEach((sec, idx) => {
-        const secRole = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
-        const isSingleShift = (sec.shiftMode === 'single') || (secRole === 'warehouse' && sec.shiftMode !== 'multi');
+        const isWh = isWarehouseSection(sec);
+        const secRole = sec.targetRole || (isWh ? 'warehouse' : 'floor');
+        const isSingleShift = isSectionSingleShift(sec, currentBranchId);
         const roleBadgeHtml = secRole === 'warehouse'
           ? '<span style="background: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">📦 مستودع</span>'
           : (secRole === 'all' ? '<span style="background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">🌐 شامل</span>' : '');
         const shiftModeBadgeHtml = isSingleShift
-          ? '<span style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">☀️ وردية واحدة</span>'
+          ? '<span style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">☀️ وردية يومية واحدة</span>'
           : '';
 
         // Filter items according to activeFilter
@@ -5431,7 +5467,7 @@
       }
       const sections = getBranchSections(currentBranchId, true);
       const sec = sections.find(s => s.id === secId);
-      const isSingleShift = sec && ((sec.shiftMode === 'single') || (sec.targetRole === 'warehouse' && sec.shiftMode !== 'multi') || (sec.id === 'sec_10' || sec.id === 'sec_11'));
+      const isSingleShift = isSectionSingleShift(sec, currentBranchId);
       const targetSh = isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
       state.sectionNotes[secId][targetSh] = note;
       saveState();
