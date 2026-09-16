@@ -419,7 +419,8 @@
     ],
     "temps": [],
     "note": "Daily Store",
-    "targetRole": "warehouse"
+    "targetRole": "warehouse",
+    "shiftMode": "single"
   },
   {
     "id": "sec_11",
@@ -427,6 +428,7 @@
     "titleEn": "11. Warehouse & Receiving",
     "titleAr": "المستودع واستلام البضائع",
     "targetRole": "warehouse",
+    "shiftMode": "single",
     "itemCount": 7,
     "items": [
       {
@@ -647,7 +649,9 @@
           { rawId: 'Ext Warehouse - Security & Doors / إغلاق الأبواب', ar: 'إحكام إغلاق الأبواب وأمان المستودع', en: 'Doors Security' }
         ],
         temps: [],
-        note: 'المستودع الخارجي'
+        note: 'المستودع الخارجي',
+        targetRole: 'warehouse',
+        shiftMode: 'single'
       }
     ];
 
@@ -879,11 +883,15 @@
         const icon = sec.icon || (idx === 0 ? '🚗' : idx === 1 ? '🚪' : idx === 2 ? '🛒' : idx === 3 ? '💳' : idx === 4 ? '🥖' : idx === 5 ? '🧀' : idx === 6 ? '🥩' : idx === 7 ? '🍗' : idx === 8 ? '🏢' : idx === 9 ? '📦' : '📋');
         const isCustom = !!sec.isCustom || String(sec.id).startsWith('sec_custom_') || String(sec.id).startsWith('sec_fruits_') || String(sec.id).startsWith('sec_roastery') || String(sec.id).startsWith('sec_seafood') || String(sec.id).startsWith('sec_facility') || String(sec.id).startsWith('sec_warehouse_');
         const secRole = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+        const isSingle = (sec.shiftMode === 'single') || (secRole === 'warehouse' && sec.shiftMode !== 'multi');
         const roleTag = secRole === 'warehouse'
           ? '<span style="background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #fde68a;">📦 مستودع</span>'
           : (secRole === 'all'
             ? '<span style="background: #ecfdf5; color: #065f46; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #a7f3d0;">🌐 شامل</span>'
             : '<span style="background: #f1f5f9; color: #475569; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #cbd5e1;">👤 صالة</span>');
+        const shiftTag = isSingle
+          ? '<span style="background: #fffbeb; color: #b45309; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #fde68a;">☀️ وردية واحدة</span>'
+          : '<span style="background: #f0fdf4; color: #166534; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #bbf7d0;">🔄 3 ورديات</span>';
 
         return `
           <div style="background: ${isEnabled ? '#ffffff' : '#f8fafc'}; border: 1.5px solid ${isEnabled ? '#cbd5e1' : '#e2e8f0'}; border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; box-shadow: ${isEnabled ? '0 1px 3px rgba(0,0,0,0.05)' : 'none'}; opacity: ${isEnabled ? '1' : '0.75'};">
@@ -895,6 +903,7 @@
                   ${sec.titleEn ? `<small style="font-size: 10.5px; color: var(--text-muted);">(${escapeHtml(sec.titleEn)})</small>` : ''}
                   ${isCustom ? '<span style="background: #eff6ff; color: #1d4ed8; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #bfdbfe;">مخصص للفرع</span>' : ''}
                   ${roleTag}
+                  ${shiftTag}
                 </div>
                 <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 3px;">
                   📋 ${itemCount} بنود تفتيش ${tempCount > 0 ? `• ❄️ ${tempCount} برادات` : ''}
@@ -968,6 +977,17 @@
       showToast(`✅ تمت إضافة "${tmpl.titleAr}" لـ (${b ? b.nameAr : branchId}) بنجاح!`);
     }
 
+    function onCustomSectionRoleChange(role) {
+      const shiftModeSelect = document.getElementById('inputCustomSectionShiftMode');
+      if (!shiftModeSelect) return;
+      if (role === 'warehouse') {
+        shiftModeSelect.value = 'single';
+      } else if (role === 'floor') {
+        shiftModeSelect.value = 'multi';
+      }
+    }
+    window.onCustomSectionRoleChange = onCustomSectionRoleChange;
+
     function showAddCustomSectionForm() {
       document.getElementById('customSectionFormTitle').innerText = '➕ إضافة مهمة / قسم جديد لهذا الفرع';
       document.getElementById('editCustomSectionId').value = '';
@@ -975,6 +995,8 @@
       document.getElementById('inputCustomSectionIcon').value = '📋';
       const roleSelect = document.getElementById('inputCustomSectionRole');
       if (roleSelect) roleSelect.value = 'floor';
+      const shiftModeSelect = document.getElementById('inputCustomSectionShiftMode');
+      if (shiftModeSelect) shiftModeSelect.value = 'multi';
       document.getElementById('inputCustomSectionItems').value = 'النظافة العامة وطاولات العرض\nالفرز والجودة وفحص التالف\nوضوح بطاقات الأسعار';
       document.getElementById('inputCustomSectionHasTemps').checked = false;
       document.getElementById('customSectionTempCountWrapper').style.display = 'none';
@@ -997,6 +1019,11 @@
       const roleSelect = document.getElementById('inputCustomSectionRole');
       if (roleSelect) {
         roleSelect.value = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+      }
+
+      const shiftModeSelect = document.getElementById('inputCustomSectionShiftMode');
+      if (shiftModeSelect) {
+        shiftModeSelect.value = sec.shiftMode || ((sec.targetRole === 'warehouse' || sec.id === 'sec_10' || sec.id === 'sec_11') ? 'single' : 'multi');
       }
 
       const itemsText = (sec.items || []).map(i => i.ar || i.en).join('\n');
@@ -1029,6 +1056,8 @@
       const icon = document.getElementById('inputCustomSectionIcon').value.trim() || '📋';
       const roleSelect = document.getElementById('inputCustomSectionRole');
       const targetRole = roleSelect ? roleSelect.value : 'floor';
+      const shiftModeSelect = document.getElementById('inputCustomSectionShiftMode');
+      const shiftMode = shiftModeSelect ? shiftModeSelect.value : ((targetRole === 'warehouse') ? 'single' : 'multi');
       const itemsRaw = document.getElementById('inputCustomSectionItems').value.trim();
       const hasTemps = document.getElementById('inputCustomSectionHasTemps').checked;
       const tempCount = parseInt(document.getElementById('inputCustomSectionTempCount').value, 10) || 1;
@@ -1071,6 +1100,7 @@
           sec.titleAr = nameAr;
           sec.icon = icon;
           sec.targetRole = targetRole;
+          sec.shiftMode = shiftMode;
           sec.items = items;
           sec.temps = temps;
           sec.itemCount = items.length;
@@ -1085,6 +1115,7 @@
           titleEn: nameAr,
           icon: icon,
           targetRole: targetRole,
+          shiftMode: shiftMode,
           itemCount: items.length,
           items: items,
           temps: temps,
@@ -1140,10 +1171,17 @@
       
       sections.forEach(sec => {
         if (!sec.items) return;
+        const isSingleShift = (sec.shiftMode === 'single') || (sec.targetRole === 'warehouse' && sec.shiftMode !== 'multi') || (sec.id === 'sec_10' || sec.id === 'sec_11');
         sec.items.forEach(itDef => {
           const it = targetItems[itDef.rawId];
           if (!it) return;
-          const shData = it[shiftId] || (typeof it.status === 'string' && (shiftId === currentShiftType) ? it : null);
+          let shData = it[shiftId] || (typeof it.status === 'string' && (shiftId === currentShiftType) ? it : null);
+          if (isSingleShift && (!shData || !shData.status || shData.status === 'pending')) {
+            const dailySh = it['morning'] || it['evening'] || it['night'];
+            if (dailySh && dailySh.status && dailySh.status !== 'pending') {
+              shData = dailySh;
+            }
+          }
           if (!shData) return;
           if (shData.status === 'done') done++;
           else if (shData.status === 'in_progress') inProgress++;
@@ -4473,16 +4511,27 @@
 
       currentBranchSections.forEach((sec, idx) => {
         const secRole = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+        const isSingleShift = (sec.shiftMode === 'single') || (secRole === 'warehouse' && sec.shiftMode !== 'multi');
         const roleBadgeHtml = secRole === 'warehouse'
           ? '<span style="background: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">📦 مستودع</span>'
           : (secRole === 'all' ? '<span style="background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">🌐 شامل</span>' : '');
+        const shiftModeBadgeHtml = isSingleShift
+          ? '<span style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">☀️ وردية واحدة</span>'
+          : '';
 
         // Filter items according to activeFilter
         const matchingItems = sec.items.filter(item => {
           const itemEntry = state.items[item.rawId] || {};
-          const itemState = (activeShiftView === 'all') 
-            ? (itemEntry[currentShiftType] || { status: 'pending' }) 
-            : (itemEntry[activeShiftView] || { status: 'pending' });
+          let itemState;
+          if (isSingleShift) {
+            itemState = (itemEntry['morning'] && itemEntry['morning'].status && itemEntry['morning'].status !== 'pending')
+              ? itemEntry['morning']
+              : (itemEntry[currentShiftType] || itemEntry['morning'] || { status: 'pending' });
+          } else {
+            itemState = (activeShiftView === 'all') 
+              ? (itemEntry[currentShiftType] || { status: 'pending' }) 
+              : (itemEntry[activeShiftView] || { status: 'pending' });
+          }
           if (activeFilter === 'all') return true;
           if (activeFilter === 'done' && itemState.status === 'done') return true;
           if (activeFilter === 'in_progress' && itemState.status === 'in_progress') return true;
@@ -4496,8 +4545,16 @@
         let secDone = 0;
         sec.items.forEach(it => {
           const itemEntry = state.items[it.rawId] || {};
-          const targetSh = (activeShiftView === 'all') ? currentShiftType : activeShiftView;
-          if (itemEntry[targetSh] && itemEntry[targetSh].status === 'done') secDone++;
+          if (isSingleShift) {
+            const isItemDone = (itemEntry['morning'] && itemEntry['morning'].status === 'done') ||
+                               (itemEntry['evening'] && itemEntry['evening'].status === 'done') ||
+                               (itemEntry['night'] && itemEntry['night'].status === 'done') ||
+                               (itemEntry[currentShiftType] && itemEntry[currentShiftType].status === 'done');
+            if (isItemDone) secDone++;
+          } else {
+            const targetSh = (activeShiftView === 'all') ? currentShiftType : activeShiftView;
+            if (itemEntry[targetSh] && itemEntry[targetSh].status === 'done') secDone++;
+          }
         });
 
         const isFullyDone = secDone === sec.items.length && sec.items.length > 0;
@@ -4544,7 +4601,7 @@
           <div class="section-title-group">
             <div class="section-num">${sec.num}</div>
             <div>
-              <span class="section-title-ar">${escapeHtml(sec.titleAr)} ${roleBadgeHtml}</span>
+              <span class="section-title-ar">${escapeHtml(sec.titleAr)} ${roleBadgeHtml} ${shiftModeBadgeHtml}</span>
               <span class="section-title-en">${escapeHtml(sec.titleEn)}</span>
             </div>
           </div>
@@ -4590,7 +4647,75 @@
           row.className = 'item-row';
           row.id = 'row_' + encodeURIComponent(item.rawId);
 
-          if (activeShiftView === 'all') {
+          if (isSingleShift) {
+            // SINGLE-SHIFT DAILY VIEW (Clean, unified full-width daily slot)
+            const targetShId = 'morning';
+            const shData = itemEntry['morning'] || itemEntry[currentShiftType] || { status: 'pending' };
+            const st = shData.status || 'pending';
+            const isDone = (st === 'done');
+            const isProgress = (st === 'in_progress');
+            const isCritical = (st === 'critical');
+            const who = shData.updatedBy ? `${shData.updatedBy} (${shData.updatedAt || ''})` : 'لم تفحص بعد';
+            const editable = canEditShift('morning');
+
+            row.innerHTML = `
+              <div class="item-main" style="margin-bottom: 6px;">
+                <div class="item-titles">
+                  <span class="item-ar">${escapeHtml(item.ar || item.en)}</span>
+                  <span class="item-en">${escapeHtml(item.en)}</span>
+                </div>
+              </div>
+              <div class="multi-shift-grid" style="grid-template-columns: 1fr;">
+                <div class="shift-slot single-daily-slot ${isDone ? 'slot-done' : (isCritical ? 'slot-critical' : '')} ${!editable ? 'slot-locked' : ''}" style="border-right: 4px solid #f59e0b; background: ${isDone ? '#f0fdf4' : (isCritical ? '#fef2f2' : '#f8fafc')}; padding: 10px 14px;">
+                  <div class="slot-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                      <span style="font-weight: 800; color: #b45309; font-size: 12.5px;">☀️ الوردية اليومية (كامل اليوم)</span>
+                      <span style="background: #fef3c7; color: #92400e; border: 1px solid #fde68a; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 999px;">نظام وردية واحدة</span>
+                      ${!editable ? '<small style="color: #94a3b8; font-size: 10px;" title="للاطلاع فقط">🔒</small>' : ''}
+                    </div>
+                    <span class="slot-who" title="${escapeHtml(who)}">👤 ${escapeHtml(who)}</span>
+                  </div>
+                  <div class="slot-actions">
+                    <button type="button" class="btn-slot-pill ${isDone ? 'active-done' : ''}" ${!editable ? 'disabled title="مقفلة - للعرض فقط"' : 'title="إتمام الفحص اليومي"'} onclick="setTaskShiftStatus('${escapeSingleQuotes(item.rawId)}', '${targetShId}', 'done')">✅ منجز لليوم</button>
+                    <button type="button" class="btn-slot-pill ${isProgress ? 'active-progress' : ''}" ${!editable ? 'disabled title="مقفلة - للعرض فقط"' : 'title="قيد العمل"'} onclick="setTaskShiftStatus('${escapeSingleQuotes(item.rawId)}', '${targetShId}', 'in_progress')">🔄 قيد العمل</button>
+                    <button type="button" class="btn-slot-pill ${isCritical ? 'active-critical' : ''}" ${!editable ? 'disabled title="مقفلة - للعرض فقط"' : 'title="عطل طارئ"'} onclick="setTaskShiftStatus('${escapeSingleQuotes(item.rawId)}', '${targetShId}', 'critical')">🚨 عطل</button>
+                  </div>
+                  <div id="evidence_slot_${encodeURIComponent(item.rawId)}_${targetShId}" style="margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                    ${(() => {
+                      const photos = getTaskPhotos(shData);
+                      if (photos.length > 0) {
+                        return `
+                          <div style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center;">
+                            ${photos.map((p, pIdx) => `
+                              <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(item.rawId)}', '${targetShId}', 'task', null, '${p.id || ''}')" title="عرض صورة الإثبات (${pIdx + 1})">
+                                <img src="${p.url}" class="evidence-thumb-preview" alt="معاينة ${pIdx + 1}">
+                                <span>📸 ${photos.length > 1 ? `#${pIdx + 1}` : 'إثبات'}</span>
+                              </button>
+                            `).join('')}
+                            ${(editable && currentUserRole !== 'admin') ? `
+                              <button type="button" class="btn-add-evidence" style="padding: 2px 6px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${targetShId}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="إضافة صورة إثبات أخرى لهذه المهمة">
+                                + صورة
+                              </button>
+                            ` : ''}
+                          </div>
+                        `;
+                      } else if (editable && currentUserRole !== 'admin') {
+                        return `
+                          <button type="button" class="btn-add-evidence" style="padding: 2px 6px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(item.rawId)}', '${targetShId}', '${escapeSingleQuotes(item.ar || item.en)}', 'task')" title="التقاط صورة لإثبات الإنجاز">
+                            📷 إرفاق
+                          </button>
+                        `;
+                      }
+                      return '';
+                    })()}
+                  </div>
+                  ${(isCritical || shData.note) ? `
+                    <input type="text" class="item-note-input" style="font-size: 11px; margin-top: 4px;" ${!editable ? 'readonly' : ''} placeholder="ملاحظة خاصة بالوردية اليومية..." value="${escapeHtml(shData.note || '')}" onchange="setTaskShiftNote('${escapeSingleQuotes(item.rawId)}', '${targetShId}', this.value)">
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          } else if (activeShiftView === 'all') {
             // MATRIX COMPARISON VIEW (ALL SHIFTS SIDE-BY-SIDE)
             row.innerHTML = `
               <div class="item-main" style="margin-bottom: 6px;">
@@ -4784,15 +4909,16 @@
                 </div>
               </div>
 
-              <div class="temp-shifts-grid">
-                ${branchShifts.map(sh => {
-                  const shTemp = (state.temperatures[tName] && state.temperatures[tName][sh.id]) || {};
+              <div class="temp-shifts-grid" style="${isSingleShift ? 'grid-template-columns: 1fr;' : ''}">
+                ${(isSingleShift ? [{ id: 'morning', nameAr: 'الوردية اليومية (كامل اليوم)' }] : branchShifts).map(sh => {
+                  const targetShId = isSingleShift ? 'morning' : sh.id;
+                  const shTemp = (state.temperatures[tName] && state.temperatures[tName][targetShId]) || {};
                   const val = shTemp.value || '';
                   const numVal = parseFloat(val);
                   const isAlert = (val !== '' && !isNaN(numVal) && (numVal > conf.max || numVal < conf.min));
-                  const shIcon = sh.id === 'morning' ? '☀️' : (sh.id === 'evening' ? '🌆' : '🌙');
+                  const shIcon = isSingleShift ? '☀️' : (sh.id === 'morning' ? '☀️' : (sh.id === 'evening' ? '🌆' : '🌙'));
                   const who = shTemp.updatedBy ? `${shTemp.updatedBy} (${shTemp.updatedAt || ''})` : 'لم تُسجل';
-                  const editable = canEditShift(sh.id);
+                  const editable = canEditShift(targetShId);
 
                   return `
                     <div class="temp-shift-col ${isAlert ? 'alert' : ''} ${!editable ? 'slot-locked' : ''}">
@@ -4802,25 +4928,25 @@
                           placeholder="--" 
                           value="${val}"
                           ${!editable ? 'readonly' : ''}
-                          onchange="setShiftTemperature('${escapeSingleQuotes(tName)}', '${sh.id}', this.value)">
+                          onchange="setShiftTemperature('${escapeSingleQuotes(tName)}', '${targetShId}', this.value)">
                         <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">°C</span>
                       </div>
                       <span class="temp-shift-who" title="${escapeHtml(who)}">👤 ${escapeHtml(who)}</span>
                       ${isAlert ? '<span style="color: #dc2626; font-size: 10px; font-weight: 800;">⚠️ غير طبيعي!</span>' : ''}
-                      <div id="evidence_temp_slot_${encodeURIComponent(tName)}_${sh.id}" style="margin-top: 4px; display: flex; justify-content: center; flex-wrap: wrap; gap: 4px;">
+                      <div id="evidence_temp_slot_${encodeURIComponent(tName)}_${targetShId}" style="margin-top: 4px; display: flex; justify-content: center; flex-wrap: wrap; gap: 4px;">
                         ${(() => {
                           const photos = getTaskPhotos(shTemp);
                           if (photos.length > 0) {
                             return `
                               <div style="display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; align-items: center;">
                                 ${photos.map((p, pIdx) => `
-                                  <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(tName)}', '${sh.id}', 'temp', null, '${p.id || ''}')" title="عرض صورة عداد الثلاجة (${pIdx + 1})">
+                                  <button type="button" class="btn-evidence-badge" style="padding: 2px 5px; font-size: 10px;" onclick="viewEvidencePhoto('${escapeSingleQuotes(tName)}', '${targetShId}', 'temp', null, '${p.id || ''}')" title="عرض صورة عداد الثلاجة (${pIdx + 1})">
                                     <img src="${p.url}" class="evidence-thumb-preview" alt="معاينة ${pIdx + 1}">
                                     <span>📸 ${photos.length > 1 ? `#${pIdx + 1}` : 'العداد'}</span>
                                   </button>
                                 `).join('')}
                                 ${(editable && currentUserRole !== 'admin') ? `
-                                  <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${sh.id}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="إضافة صورة أخرى للعداد">
+                                  <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${targetShId}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="إضافة صورة أخرى للعداد">
                                     + عداد
                                   </button>
                                 ` : ''}
@@ -4828,7 +4954,7 @@
                             `;
                           } else if (editable && currentUserRole !== 'admin') {
                             return `
-                              <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${sh.id}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="تصوير عداد الثلاجة للتوثيق">
+                              <button type="button" class="btn-add-evidence" style="padding: 2px 5px; font-size: 10px;" onclick="triggerPhotoCapture('${escapeSingleQuotes(tName)}', '${targetShId}', 'قراءة ثلاجة: ${escapeSingleQuotes(conf.ar || tName)}', 'temp')" title="تصوير عداد الثلاجة للتوثيق">
                                 📷 العداد
                               </button>
                             `;
@@ -4851,10 +4977,11 @@
         if (sec.note) {
           const noteBox = document.createElement('div');
           noteBox.className = 'section-notes-area';
+          const targetNoteSh = isSingleShift ? 'morning' : (activeShiftView === 'all' ? currentShiftType : activeShiftView);
           const savedNote = (state.sectionNotes[sec.id] && typeof state.sectionNotes[sec.id] === 'object') ?
-            (state.sectionNotes[sec.id][activeShiftView === 'all' ? currentShiftType : activeShiftView] || '') :
+            (state.sectionNotes[sec.id][targetNoteSh] || '') :
             (state.sectionNotes[sec.id] || '');
-          const editable = canEditShift(activeShiftView === 'all' ? currentShiftType : activeShiftView);
+          const editable = canEditShift(targetNoteSh);
           noteBox.innerHTML = `
             <label>📝 ملاحظات عامة لقسم ${sec.titleAr}:</label>
             <textarea class="section-notes-textarea" ${!editable ? 'readonly style="background: #f8fafc; cursor: not-allowed;"' : ''}
@@ -4977,7 +5104,13 @@
         return true;
       }
 
-      // 2. Floor supervisor can only edit the shift matching the operational time window
+      // 2. Warehouse Keepers work daytime daily shift (06:00 to 21:00)
+      if (currentUserRole === 'warehouse_keeper') {
+        const curHour = new Date().getHours();
+        return (curHour >= 6 && curHour < 21);
+      }
+
+      // 3. Floor supervisor can only edit the shift matching the operational time window
       const shifts = getBranchShifts(currentBranchId);
       const targetShift = shifts.find(s => s.id === shiftId);
       if (!targetShift || !targetShift.start || !targetShift.end) {
@@ -5296,7 +5429,10 @@
       if (!state.sectionNotes[secId] || typeof state.sectionNotes[secId] !== 'object') {
         state.sectionNotes[secId] = {};
       }
-      const targetSh = (activeShiftView === 'all') ? currentShiftType : activeShiftView;
+      const sections = getBranchSections(currentBranchId, true);
+      const sec = sections.find(s => s.id === secId);
+      const isSingleShift = sec && ((sec.shiftMode === 'single') || (sec.targetRole === 'warehouse' && sec.shiftMode !== 'multi') || (sec.id === 'sec_10' || sec.id === 'sec_11'));
+      const targetSh = isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
       state.sectionNotes[secId][targetSh] = note;
       saveState();
       showToast("تم حفظ ملاحظة القسم");
