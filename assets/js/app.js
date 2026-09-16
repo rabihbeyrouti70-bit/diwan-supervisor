@@ -418,10 +418,73 @@
       }
     ],
     "temps": [],
-    "note": "Daily Store"
+    "note": "Daily Store",
+    "targetRole": "warehouse"
+  },
+  {
+    "id": "sec_11",
+    "num": 11,
+    "titleEn": "11. Warehouse & Receiving",
+    "titleAr": "المستودع واستلام البضائع",
+    "targetRole": "warehouse",
+    "itemCount": 7,
+    "items": [
+      {
+        "rawId": "Warehouse - Goods Receiving & Invoices / استلام بضائع الموردين ومطابقة الفواتير",
+        "en": "Goods Receiving & Invoices",
+        "ar": "استلام بضائع الموردين ومطابقة الفواتير"
+      },
+      {
+        "rawId": "Warehouse - Cold Storage Temps / فحص حرارة برادات ومجمدات التخزين",
+        "en": "Cold Storage Temps",
+        "ar": "فحص حرارة برادات ومجمدات التخزين"
+      },
+      {
+        "rawId": "Warehouse - FIFO Stacking / تطبيق قاعدة التخزين السليم (FIFO)",
+        "en": "FIFO Stacking",
+        "ar": "تطبيق قاعدة التخزين السليم (FIFO)"
+      },
+      {
+        "rawId": "Warehouse - Short Expiry Inspection / حصر الرواكد وتواريخ الانتهاء القريبة",
+        "en": "Short Expiry Inspection",
+        "ar": "حصر الرواكد وتواريخ الانتهاء القريبة"
+      },
+      {
+        "rawId": "Warehouse - Damaged Goods Quarantine / عزل وتوثيق المرتجعات والتوالف",
+        "en": "Damaged Goods Quarantine",
+        "ar": "عزل وتوثيق المرتجعات والتوالف"
+      },
+      {
+        "rawId": "Warehouse - Floor Replenishment / تزويد صالة العرض بالنواقص والطلبيات",
+        "en": "Floor Replenishment",
+        "ar": "تزويد صالة العرض بالنواقص والطلبيات"
+      },
+      {
+        "rawId": "Warehouse - Cleanliness & Pallets / نظافة المستودع وسلامة الطبالي ومكافحة الحشرات",
+        "en": "Cleanliness & Pallets",
+        "ar": "نظافة المستودع وسلامة الطبالي ومكافحة الحشرات"
+      }
+    ],
+    "temps": [
+      "Warehouse Cold Storage 1",
+      "Warehouse Freezer 1"
+    ],
+    "note": "Warehouse & Receiving"
   }
 ];
     const TEMP_CONFIGS = {
+  "Warehouse Cold Storage 1": {
+    "min": 0,
+    "max": 4,
+    "target": "0°C - 4°C",
+    "ar": "حرارة براد التخزين الخلفي"
+  },
+  "Warehouse Freezer 1": {
+    "min": -22,
+    "max": -18,
+    "target": "-22°C - -18°C",
+    "ar": "حرارة مجمدة التخزين"
+  },
   "La-Farina Refrigerator 1": {
     "min": 1,
     "max": 5,
@@ -815,6 +878,12 @@
         const tempCount = sec.temps ? sec.temps.length : 0;
         const icon = sec.icon || (idx === 0 ? '🚗' : idx === 1 ? '🚪' : idx === 2 ? '🛒' : idx === 3 ? '💳' : idx === 4 ? '🥖' : idx === 5 ? '🧀' : idx === 6 ? '🥩' : idx === 7 ? '🍗' : idx === 8 ? '🏢' : idx === 9 ? '📦' : '📋');
         const isCustom = !!sec.isCustom || String(sec.id).startsWith('sec_custom_') || String(sec.id).startsWith('sec_fruits_') || String(sec.id).startsWith('sec_roastery') || String(sec.id).startsWith('sec_seafood') || String(sec.id).startsWith('sec_facility') || String(sec.id).startsWith('sec_warehouse_');
+        const secRole = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+        const roleTag = secRole === 'warehouse'
+          ? '<span style="background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #fde68a;">📦 مستودع</span>'
+          : (secRole === 'all'
+            ? '<span style="background: #ecfdf5; color: #065f46; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #a7f3d0;">🌐 شامل</span>'
+            : '<span style="background: #f1f5f9; color: #475569; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #cbd5e1;">👤 صالة</span>');
 
         return `
           <div style="background: ${isEnabled ? '#ffffff' : '#f8fafc'}; border: 1.5px solid ${isEnabled ? '#cbd5e1' : '#e2e8f0'}; border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; box-shadow: ${isEnabled ? '0 1px 3px rgba(0,0,0,0.05)' : 'none'}; opacity: ${isEnabled ? '1' : '0.75'};">
@@ -825,6 +894,7 @@
                   <strong style="font-size: 13.5px; color: ${isEnabled ? 'var(--secondary)' : '#64748b'};">${escapeHtml(sec.titleAr || sec.titleEn || 'قسم')}</strong>
                   ${sec.titleEn ? `<small style="font-size: 10.5px; color: var(--text-muted);">(${escapeHtml(sec.titleEn)})</small>` : ''}
                   ${isCustom ? '<span style="background: #eff6ff; color: #1d4ed8; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #bfdbfe;">مخصص للفرع</span>' : ''}
+                  ${roleTag}
                 </div>
                 <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 3px;">
                   📋 ${itemCount} بنود تفتيش ${tempCount > 0 ? `• ❄️ ${tempCount} برادات` : ''}
@@ -903,6 +973,8 @@
       document.getElementById('editCustomSectionId').value = '';
       document.getElementById('inputCustomSectionNameAr').value = '';
       document.getElementById('inputCustomSectionIcon').value = '📋';
+      const roleSelect = document.getElementById('inputCustomSectionRole');
+      if (roleSelect) roleSelect.value = 'floor';
       document.getElementById('inputCustomSectionItems').value = 'النظافة العامة وطاولات العرض\nالفرز والجودة وفحص التالف\nوضوح بطاقات الأسعار';
       document.getElementById('inputCustomSectionHasTemps').checked = false;
       document.getElementById('customSectionTempCountWrapper').style.display = 'none';
@@ -922,6 +994,11 @@
       document.getElementById('inputCustomSectionNameAr').value = sec.titleAr || '';
       document.getElementById('inputCustomSectionIcon').value = sec.icon || '📋';
       
+      const roleSelect = document.getElementById('inputCustomSectionRole');
+      if (roleSelect) {
+        roleSelect.value = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+      }
+
       const itemsText = (sec.items || []).map(i => i.ar || i.en).join('\n');
       document.getElementById('inputCustomSectionItems').value = itemsText;
 
@@ -950,6 +1027,8 @@
       const editId = document.getElementById('editCustomSectionId').value.trim();
       const nameAr = document.getElementById('inputCustomSectionNameAr').value.trim();
       const icon = document.getElementById('inputCustomSectionIcon').value.trim() || '📋';
+      const roleSelect = document.getElementById('inputCustomSectionRole');
+      const targetRole = roleSelect ? roleSelect.value : 'floor';
       const itemsRaw = document.getElementById('inputCustomSectionItems').value.trim();
       const hasTemps = document.getElementById('inputCustomSectionHasTemps').checked;
       const tempCount = parseInt(document.getElementById('inputCustomSectionTempCount').value, 10) || 1;
@@ -991,6 +1070,7 @@
         if (sec) {
           sec.titleAr = nameAr;
           sec.icon = icon;
+          sec.targetRole = targetRole;
           sec.items = items;
           sec.temps = temps;
           sec.itemCount = items.length;
@@ -1004,6 +1084,7 @@
           titleAr: nameAr,
           titleEn: nameAr,
           icon: icon,
+          targetRole: targetRole,
           itemCount: items.length,
           items: items,
           temps: temps,
@@ -1189,18 +1270,48 @@
       setElementRoleVisibility(btnShifts, isAnyManager, 'inline-flex');
       setElementRoleVisibility(btnDirHead, isAnyManager, 'inline-flex');
       const btnSupAlert = document.getElementById('btnSupervisorAlert');
-      const isFloorSupervisor = (activeRole === 'supervisor' || !isAnyManager);
-      setElementRoleVisibility(btnSupAlert, isFloorSupervisor, 'inline-flex');
+      const isFieldStaff = (activeRole === 'supervisor' || activeRole === 'warehouse_keeper' || !isAnyManager);
+      setElementRoleVisibility(btnSupAlert, isFieldStaff, 'inline-flex');
+
+      // 4. Operational Scope Filter Bar (All / Floor / Warehouse) - visible for Managers only
+      const scopeFilterBar = document.getElementById('operationalScopeFilterBar');
+      setElementRoleVisibility(scopeFilterBar, isAnyManager, 'flex');
 
       if (isGeneralManager && typeof listenToHqEvidenceFeed === 'function') {
         listenToHqEvidenceFeed();
       }
 
-      // 4. Live Presence Strip
+      // 5. Live Presence Strip
       if (!isAnyManager && presStrip) {
         setElementRoleVisibility(presStrip, false);
       }
     }
+
+    let activeOperationalScope = "all"; // 'all' | 'floor' | 'warehouse'
+
+    function setOperationalScope(scope) {
+      activeOperationalScope = scope || 'all';
+      ['All', 'Floor', 'Warehouse'].forEach(s => {
+        const btn = document.getElementById('scopeBtn' + s);
+        if (!btn) return;
+        const isActive = (s.toLowerCase() === activeOperationalScope);
+        if (isActive) {
+          btn.classList.add('active');
+          btn.style.borderColor = '#059669';
+          btn.style.background = '#ecfdf5';
+          btn.style.color = '#065f46';
+          btn.style.fontWeight = '800';
+        } else {
+          btn.classList.remove('active');
+          btn.style.borderColor = 'var(--border)';
+          btn.style.background = 'white';
+          btn.style.color = 'var(--text)';
+          btn.style.fontWeight = '700';
+        }
+      });
+      renderSections();
+    }
+    window.setOperationalScope = setOperationalScope;
     let currentShiftType = "morning"; // Active operating shift for logging
     let activeShiftView = "all";       // View mode: 'all' (matrix comparison) or 'morning' | 'evening' | 'night'
     let currentDate = new Date().toISOString().split("T")[0];
@@ -1583,7 +1694,12 @@
 
       // Floor Supervisors (مسؤولو الصالة الافتراضيون)
       { id: 'sup_issa', name: 'عيسى ورور (Issa Warwar)', role: 'supervisor', branchId: 'baddawi', pinHash: '15fc36b3e80b9d7f87f7dc90cd7a2845c5d8501c30f03379fcf14154f1680380' },
-      { id: 'sup_sameh', name: 'سامح الحسن (Sameh El-Hassan)', role: 'supervisor', branchId: 'baddawi', pinHash: 'be41b7f1fa56ba2b0582910053c86cf6ee7e311efc51300220df0918bb9a287b' }
+      { id: 'sup_sameh', name: 'سامح الحسن (Sameh El-Hassan)', role: 'supervisor', branchId: 'baddawi', pinHash: 'be41b7f1fa56ba2b0582910053c86cf6ee7e311efc51300220df0918bb9a287b' },
+
+      // Warehouse Keepers (أمناء المستودعات الافتراضيون - PIN: 1133)
+      { id: 'wh_baddawi', name: 'أمين مستودع البداوي', role: 'warehouse_keeper', branchId: 'baddawi', pinHash: '7a99d42d79e9bafeaa5ccedaf0135267da4ccd197a99131a8cf15025cb54ab18' },
+      { id: 'wh_noueiery', name: 'أمين مستودع النويري', role: 'warehouse_keeper', branchId: 'noueiery', pinHash: '7a99d42d79e9bafeaa5ccedaf0135267da4ccd197a99131a8cf15025cb54ab18' },
+      { id: 'wh_khaldeh', name: 'أمين مستودع خلدة', role: 'warehouse_keeper', branchId: 'khaldeh', pinHash: '7a99d42d79e9bafeaa5ccedaf0135267da4ccd197a99131a8cf15025cb54ab18' }
     ];
 
     // currentUserRole initialized above with active session restoration
@@ -2125,6 +2241,8 @@
               roleBadge.innerHTML = '<span style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">👑 المدير العام (كامل الصلاحيات)</span>';
             } else if (currentUserRole === 'branch_manager') {
               roleBadge.innerHTML = '<span style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">🏢 مدير فرع</span>';
+            } else if (currentUserRole === 'warehouse_keeper') {
+              roleBadge.innerHTML = '<span style="background: #fef3c7; color: #b45309; border: 1px solid #f59e0b; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">📦 أمين المستودع</span>';
             } else {
               roleBadge.innerHTML = '<span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">👤 مسؤول صالة</span>';
             }
@@ -2147,7 +2265,9 @@
             } else {
               dateInput.disabled = true;
               dateInput.style.opacity = '0.7';
-              dateInput.title = '🔒 تاريخ اليوم ثابت لمسؤول الصالة';
+              dateInput.title = (currentUserRole === 'warehouse_keeper')
+                ? '🔒 تاريخ اليوم ثابت لأمين المستودع'
+                : '🔒 تاريخ اليوم ثابت لمسؤول الصالة';
             }
           }
 
@@ -4320,8 +4440,43 @@
 
       const branchShifts = getBranchShifts(currentBranchId);
 
-      const currentBranchSections = getBranchSections(currentBranchId, false);
+      const allBranchSections = getBranchSections(currentBranchId, false);
+      const currentBranchSections = allBranchSections.filter(sec => {
+        const secRole = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+        if (currentUserRole === 'warehouse_keeper') {
+          return secRole === 'warehouse' || secRole === 'all';
+        }
+        if (currentUserRole === 'supervisor') {
+          return secRole === 'floor' || secRole === 'all';
+        }
+        // Managers (admin / branch_manager)
+        if (activeOperationalScope === 'warehouse') {
+          return secRole === 'warehouse' || secRole === 'all';
+        }
+        if (activeOperationalScope === 'floor') {
+          return secRole === 'floor' || secRole === 'all';
+        }
+        return true; // 'all' scope shows all sections
+      });
+
+      if (currentBranchSections.length === 0) {
+        const emptyNotice = document.createElement('div');
+        emptyNotice.className = 'empty-state-notice';
+        emptyNotice.style.cssText = 'text-align: center; padding: 40px 20px; background: white; border: 1.5px dashed var(--border); border-radius: 12px; margin: 20px 0; color: var(--text-muted);';
+        const roleMsg = (currentUserRole === 'warehouse_keeper') 
+          ? 'لا توجد مهام مستودع معرفة لهذا الفرع حالياً.'
+          : (activeOperationalScope === 'warehouse' ? 'لا توجد مهام مستودع في هذا الفرع.' : 'لا توجد مهام مطابقة.');
+        emptyNotice.innerHTML = `<span style="font-size: 32px; display: block; margin-bottom: 8px;">📦</span><strong style="font-size: 14px; color: var(--secondary);">${roleMsg}</strong>`;
+        container.appendChild(emptyNotice);
+        return;
+      }
+
       currentBranchSections.forEach((sec, idx) => {
+        const secRole = sec.targetRole || (sec.id === 'sec_10' || sec.id === 'sec_11' ? 'warehouse' : 'floor');
+        const roleBadgeHtml = secRole === 'warehouse'
+          ? '<span style="background: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">📦 مستودع</span>'
+          : (secRole === 'all' ? '<span style="background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; border-radius: 999px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; margin-right: 6px;">🌐 شامل</span>' : '');
+
         // Filter items according to activeFilter
         const matchingItems = sec.items.filter(item => {
           const itemEntry = state.items[item.rawId] || {};
@@ -4389,7 +4544,7 @@
           <div class="section-title-group">
             <div class="section-num">${sec.num}</div>
             <div>
-              <span class="section-title-ar">${escapeHtml(sec.titleAr)}</span>
+              <span class="section-title-ar">${escapeHtml(sec.titleAr)} ${roleBadgeHtml}</span>
               <span class="section-title-en">${escapeHtml(sec.titleEn)}</span>
             </div>
           </div>
@@ -6513,19 +6668,21 @@
       const container = document.getElementById('supervisorsListContainer');
       let list = getSupervisorsList();
 
-      // If branch_manager, only show floor supervisors belonging to this branch (hide admin accounts)
+      // If branch_manager, only show floor supervisors and warehouse keepers belonging to this branch (hide admin & other managers)
       if (currentUserRole === 'branch_manager') {
-        list = list.filter(s => s.branchId === currentBranchId && s.id !== 'admin' && s.id !== 'chairman' && s.role !== 'admin');
+        list = list.filter(s => s.branchId === currentBranchId && s.id !== 'admin' && s.id !== 'chairman' && s.role !== 'admin' && s.role !== 'branch_manager');
       }
 
-      // Sort: Chairman (0), General Manager (1), Branch Manager (2), Floor Supervisors (3)
+      // Sort: Chairman (0), General Manager (1), Branch Manager (2), Floor Supervisors (3), Warehouse Keepers (4)
       list.sort((a, b) => {
         const getOrder = (u) => {
           if (u.id === 'chairman' || (u.name && u.name.includes('رئيس مجلس الإدارة'))) return 0;
           if (u.id === 'admin' || (u.name && u.name.includes('المدير العام'))) return 1;
           if (u.role === 'admin') return 1;
           if (u.role === 'branch_manager' || (u.id && u.id.startsWith('mgr_'))) return 2;
-          return 3;
+          if (u.role === 'supervisor') return 3;
+          if (u.role === 'warehouse_keeper' || (u.id && u.id.startsWith('wh_'))) return 4;
+          return 5;
         };
         return getOrder(a) - getOrder(b);
       });
@@ -6566,6 +6723,8 @@
           roleBadge = '<span style="background: #fdf4ff; color: #a855f7; border: 1px solid #d8b4fe; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">👑 مدير عام</span>';
         } else if (isBranchMgr) {
           roleBadge = '<span style="background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">🏢 مدير فرع</span>';
+        } else if (s.role === 'warehouse_keeper') {
+          roleBadge = '<span style="background: #fef3c7; color: #b45309; border: 1px solid #f59e0b; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800;">📦 أمين مستودع</span>';
         }
 
         const pres = livePresenceCache[s.id];
@@ -6625,7 +6784,7 @@
             </div>
             <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
               ${((currentUserRole === 'admin' && s.id !== currentUserId) ||
-                 (currentUserRole === 'branch_manager' && s.branchId === currentBranchId && s.id !== currentUserId && s.role === 'supervisor')) ? `
+                 (currentUserRole === 'branch_manager' && s.branchId === currentBranchId && s.id !== currentUserId && (s.role === 'supervisor' || s.role === 'warehouse_keeper'))) ? `
                 <button type="button" class="btn btn-sm" style="padding: 4px 10px; font-size: 12px; font-weight: 800; background: ${isOnline ? '#10b981' : '#059669'}; color: white; border: none; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(16,185,129,0.3);" onclick="event.stopPropagation(); closeSupervisorsModal(); initiateVoiceCall('${escapeHtml(s.id)}')">
                   📞 اتصال
                 </button>
@@ -6650,14 +6809,14 @@
       populateSupervisorBranchSelect();
       const b = getBranchById(currentBranchId);
       document.getElementById('supervisorFormTitle').innerText = (currentUserRole === 'branch_manager')
-        ? `➕ إضافة مسؤول صالة لفرع (${b ? b.nameAr : ''})`
-        : '➕ إضافة مسؤول صالة أو مدير فرع جديد';
+        ? `➕ إضافة مسؤول صالة أو أمين مستودع لفرع (${b ? b.nameAr : ''})`
+        : '➕ إضافة مسؤول صالة أو أمين مستودع أو مدير جديد';
       document.getElementById('editSupervisorId').value = '';
       document.getElementById('inputSupervisorName').value = '';
       const roleInput = document.getElementById('inputSupervisorRole');
       if (roleInput) {
         roleInput.value = 'supervisor';
-        roleInput.disabled = (currentUserRole === 'branch_manager');
+        roleInput.disabled = false;
       }
       const branchInput = document.getElementById('inputSupervisorBranch');
       if (branchInput) {
@@ -6681,8 +6840,8 @@
       if (!sup) return;
 
       if (currentUserRole === 'branch_manager') {
-        if (sup.branchId !== currentBranchId || sup.role !== 'supervisor') {
-          alert("عذراً، يحق لك فقط تعديل مسؤولي الصالة التابعين لفرعك.");
+        if (sup.branchId !== currentBranchId || (sup.role !== 'supervisor' && sup.role !== 'warehouse_keeper')) {
+          alert("عذراً، يحق لك فقط تعديل موظفي فرعك (مسؤول صالة أو أمين مستودع).");
           return;
         }
       }
@@ -6697,7 +6856,7 @@
       const roleInput = document.getElementById('inputSupervisorRole');
       if (roleInput) {
         roleInput.value = sup.role || 'supervisor';
-        roleInput.disabled = (sup.id === 'admin' || sup.id === 'chairman' || currentUserRole === 'branch_manager');
+        roleInput.disabled = (sup.id === 'admin' || sup.id === 'chairman');
       }
       document.getElementById('editSupervisorId').value = sup.id;
       document.getElementById('inputSupervisorName').value = sup.name;
@@ -6738,18 +6897,20 @@
       let role = (roleInput && roleInput.value) ? roleInput.value : 'supervisor';
       const errBox = document.getElementById('supervisorFormError');
 
-      // Strict security: Branch Managers can ONLY add/edit floor supervisors to their own branch
+      // Strict security: Branch Managers can ONLY add/edit floor supervisors and warehouse keepers to their own branch
       if (currentUserRole === 'branch_manager') {
         const curList = getSupervisorsList();
         if (id) {
           const targetSup = curList.find(s => s.id === id);
           if (targetSup && (targetSup.role === 'admin' || targetSup.role === 'branch_manager' || targetSup.branchId !== currentBranchId)) {
-            errBox.innerText = 'عذراً، يمكن لمدير الفرع تعديل مسؤولي صالة فرعه فقط.';
+            errBox.innerText = 'عذراً، يمكن لمدير الفرع تعديل مسؤولي صالة وأمناء مستودع فرعه فقط.';
             return;
           }
         }
         branchId = currentBranchId;
-        role = 'supervisor';
+        if (role !== 'supervisor' && role !== 'warehouse_keeper') {
+          role = 'supervisor';
+        }
       }
 
       // Executive account locks
@@ -6780,7 +6941,7 @@
         // Generate salt for cryptographic security (C10)
         const salt = Math.random().toString(36).substring(2, 10);
         const hash = await computeHash(pin, salt);
-        const newId = 'sup_' + Date.now();
+        const newId = (role === 'warehouse_keeper' ? 'wh_' : 'sup_') + Date.now();
         list.push({
           id: newId,
           name: name,
@@ -6860,8 +7021,8 @@
         return;
       }
 
-      if (currentUserRole === 'branch_manager' && (sup.branchId !== currentBranchId || sup.role !== 'supervisor')) {
-        alert("عذراً، يمكن لمدير الفرع حذف مسؤولي صالة فرعه فقط.");
+      if (currentUserRole === 'branch_manager' && (sup.branchId !== currentBranchId || (sup.role !== 'supervisor' && sup.role !== 'warehouse_keeper'))) {
+        alert("عذراً، يمكن لمدير الفرع حذف مسؤولي صالة وأمناء مستودع فرعه فقط.");
         return;
       }
 
@@ -7230,8 +7391,10 @@
           if (currentUserRole !== 'branch_manager') return;
         } else if (directive.targetUserId === 'all_supervisors') {
           if (currentUserRole !== 'supervisor') return;
+        } else if (directive.targetUserId === 'all_warehouse_keepers') {
+          if (currentUserRole !== 'warehouse_keeper') return;
         } else {
-          // Specific user targeted (e.g. sup_sameh)
+          // Specific user targeted (e.g. sup_sameh or wh_baddawi)
           if (directive.targetUserId !== currentUserId) return;
         }
       }
@@ -7742,11 +7905,11 @@
         targetUserId: 'all_managers',
         targetUserName: 'مدراء الفروع والإدارة العامة',
         senderRole: currentUserRole || 'supervisor',
-        senderName: currentSupervisor || 'مسؤول الصالة',
+        senderName: currentSupervisor || (currentUserRole === 'warehouse_keeper' ? 'أمين المستودع' : 'مسؤول الصالة'),
         senderId: currentUserId || 'supervisor',
         priority: 'urgent',
         category: category,
-        text: `[🚨 بلاغ صالة: ${category}] ${text}`,
+        text: `[🚨 ${currentUserRole === 'warehouse_keeper' ? 'بلاغ مستودع' : 'بلاغ صالة'}: ${category}] ${text}`,
         audioBase64: supervisorAlertAudioBase64 || '',
         audioDuration: supervisorAlertRecordSeconds || 0,
         photoBase64: supervisorAlertPhotoBase64 || '',
@@ -9507,17 +9670,27 @@ if (window._callAudioCtx) {
         hint.innerHTML = (targetBranch === 'all')
           ? '👤 <strong>خاص بمسؤولي الصالة:</strong> سيصل التوجيه لكافة مسؤولي الصالة في جميع الفروع.'
           : `👤 <strong>خاص بمسؤولي الصالة:</strong> سيصل التوجيه لمسؤولي الصالة في فرع ${escapeHtml(branchName)} فقط.`;
+      } else if (targetVal === 'all_warehouse_keepers') {
+        hint.style.display = 'block';
+        hint.style.background = '#fffbeb';
+        hint.style.borderColor = '#fde68a';
+        hint.style.color = '#b45309';
+        hint.innerHTML = (targetBranch === 'all')
+          ? '📦 <strong>خاص بأمناء المستودعات:</strong> سيصل التوجيه لكافة أمناء المستودعات والمخازن في جميع الفروع فقط.'
+          : `📦 <strong>خاص بأمين المستودع:</strong> سيصل التوجيه لأمين مستودع فرع ${escapeHtml(branchName)} فقط ولن يظهر لمسؤولي الصالة.`;
       } else {
         const targetSupObj = getSupervisorsList().find(s => s.id === targetVal);
         if (targetSupObj) {
           const isMgr = targetSupObj.role === 'branch_manager' || (targetSupObj.id && targetSupObj.id.startsWith('mgr_'));
+          const isWh = targetSupObj.role === 'warehouse_keeper' || (targetSupObj.id && targetSupObj.id.startsWith('wh_'));
           const sBranch = getBranchById(targetSupObj.branchId);
           const sBranchName = sBranch ? sBranch.nameAr : (targetSupObj.branchId || '');
+          const roleTitle = isMgr ? 'مدير الفرع' : (isWh ? 'أمين المستودع' : 'مسؤول الصالة');
           hint.style.display = 'block';
           hint.style.background = '#fdf2f8';
           hint.style.borderColor = '#fbcfe8';
           hint.style.color = '#9d174d';
-          hint.innerHTML = `🎯 <strong>توجيه شخصي حصري:</strong> سيصل التوجيه <u>حصرياً</u> إلى ${isMgr ? 'مدير الفرع' : 'مسؤول الصالة'}: <strong>${escapeHtml(targetSupObj.name)}</strong> (${escapeHtml(sBranchName)}) ولن يتمكن أي موظف آخر من رؤيته أو استلامه.`;
+          hint.innerHTML = `🎯 <strong>توجيه شخصي حصري:</strong> سيصل التوجيه <u>حصرياً</u> إلى ${roleTitle}: <strong>${escapeHtml(targetSupObj.name)}</strong> (${escapeHtml(sBranchName)}) ولن يتمكن أي موظف آخر من رؤيته أو استلامه.`;
         } else {
           hint.style.display = 'none';
         }
@@ -9568,6 +9741,7 @@ if (window._callAudioCtx) {
               <option value="all">🌐 كافة المشرفين والمسؤولين والمدراء في كل الفروع (تعميم مركزي)</option>
               <option value="all_managers">👔 كافة مديري الفروع فقط (في جميع الفروع)</option>
               <option value="all_supervisors">👥 كافة مسؤولي الصالة فقط (في جميع الفروع)</option>
+              <option value="all_warehouse_keepers">📦 كافة أمناء المستودعات فقط (في جميع الفروع)</option>
             </optgroup>
           `;
 
@@ -9596,12 +9770,18 @@ if (window._callAudioCtx) {
 
           const branches = getBranchesList();
           branches.forEach(b => {
-            const branchSups = supervisors.filter(s => s.branchId === b.id && s.role === 'supervisor' && s.id !== 'admin' && s.id !== 'chairman');
-            if (branchSups.length > 0) {
-              html += `<optgroup label="📍 فرع ${escapeHtml(b.nameAr)} - مسؤولو الصالة (شخصي):">`;
+            const branchStaff = supervisors.filter(s => s.branchId === b.id && s.id !== 'admin' && s.id !== 'chairman' && s.role !== 'branch_manager');
+            const branchSups = branchStaff.filter(s => s.role === 'supervisor');
+            const branchWhs = branchStaff.filter(s => s.role === 'warehouse_keeper');
+            if (branchSups.length > 0 || branchWhs.length > 0) {
+              html += `<optgroup label="📍 فرع ${escapeHtml(b.nameAr)} - الكادر التنفيذي (شخصي):">`;
               branchSups.forEach(s => {
                 const icon = getDevIcon(s.id);
                 html += `<option value="${escapeHtml(s.id)}" data-branch="${escapeHtml(b.id)}">${icon}👤 ${escapeHtml(s.name)} (${escapeHtml(b.nameAr)})</option>`;
+              });
+              branchWhs.forEach(w => {
+                const icon = getDevIcon(w.id);
+                html += `<option value="${escapeHtml(w.id)}" data-branch="${escapeHtml(b.id)}">${icon}📦 ${escapeHtml(w.name)} (${escapeHtml(b.nameAr)})</option>`;
               });
               html += `</optgroup>`;
             }
@@ -9613,11 +9793,13 @@ if (window._callAudioCtx) {
           const branchUsers = supervisors.filter(s => s.branchId === targetBranch && s.id !== 'admin' && s.id !== 'chairman' && s.role !== 'admin');
           const branchMgrs = branchUsers.filter(s => s.role === 'branch_manager' || (s.id && s.id.startsWith('mgr_')));
           const branchSups = branchUsers.filter(s => s.role === 'supervisor');
+          const branchWhs = branchUsers.filter(s => s.role === 'warehouse_keeper');
 
           html += `
             <optgroup label="📢 خيارات عامة لفرع ${escapeHtml(branchName)}:">
-              <option value="all">👥 كافة موظفي ${escapeHtml(branchName)} (المدير ومسؤولو الصالة)</option>
+              <option value="all">👥 كافة كادر ${escapeHtml(branchName)} (المدير، الصالة، والمستودع)</option>
               <option value="all_supervisors">👤 كافة مسؤولي صالة ${escapeHtml(branchName)} فقط</option>
+              <option value="all_warehouse_keepers">📦 أمين مستودع ${escapeHtml(branchName)} فقط</option>
             </optgroup>
           `;
 
@@ -9638,14 +9820,26 @@ if (window._callAudioCtx) {
             });
             html += `</optgroup>`;
           }
+
+          if (branchWhs.length > 0) {
+            html += `<optgroup label="📦 المستودع والمخازن (توجيه خاص):">`;
+            branchWhs.forEach(w => {
+              const icon = getDevIcon(w.id);
+              html += `<option value="${escapeHtml(w.id)}" data-branch="${escapeHtml(targetBranch)}">${icon}📦 ${escapeHtml(w.name)}</option>`;
+            });
+            html += `</optgroup>`;
+          }
         }
       } else {
         // Branch Manager sending within their own branch
         supSel.disabled = false;
         const branchSups = supervisors.filter(s => s.branchId === currentBranchId && s.role === 'supervisor');
+        const branchWhs = supervisors.filter(s => s.branchId === currentBranchId && s.role === 'warehouse_keeper');
         html += `
           <optgroup label="📢 جماعي:">
-            <option value="all">👥 كافة مسؤولي الصالة في فرعك</option>
+            <option value="all">👥 كافة الكادر في فرعك (الصالة والمستودع)</option>
+            <option value="all_supervisors">👤 مسؤولو الصالة فقط</option>
+            <option value="all_warehouse_keepers">📦 أمناء المستودع فقط</option>
           </optgroup>
         `;
         if (branchSups.length > 0) {
@@ -9653,6 +9847,14 @@ if (window._callAudioCtx) {
           branchSups.forEach(s => {
             const icon = getDevIcon(s.id);
             html += `<option value="${escapeHtml(s.id)}" data-branch="${escapeHtml(currentBranchId)}">${icon}👤 ${escapeHtml(s.name)}</option>`;
+          });
+          html += `</optgroup>`;
+        }
+        if (branchWhs.length > 0) {
+          html += `<optgroup label="📦 المستودع والمخازن (خاص):">`;
+          branchWhs.forEach(w => {
+            const icon = getDevIcon(w.id);
+            html += `<option value="${escapeHtml(w.id)}" data-branch="${escapeHtml(currentBranchId)}">${icon}📦 ${escapeHtml(w.name)}</option>`;
           });
           html += `</optgroup>`;
         }
@@ -9840,6 +10042,8 @@ if (window._callAudioCtx) {
                     if (currentUserRole === 'branch_manager' || currentUserRole === 'admin') triggerDirectiveAlert(d);
                   } else if (d.targetUserId === 'all_supervisors') {
                     if (currentUserRole === 'supervisor') triggerDirectiveAlert(d);
+                  } else if (d.targetUserId === 'all_warehouse_keepers') {
+                    if (currentUserRole === 'warehouse_keeper') triggerDirectiveAlert(d);
                   } else if (!d.targetUserId || d.targetUserId === 'all') {
                     triggerDirectiveAlert(d);
                   } else if (d.targetUserId === currentUserId) {
@@ -9901,6 +10105,8 @@ if (window._callAudioCtx) {
             return (currentUserRole === 'branch_manager');
           } else if (d.targetUserId === 'all_supervisors') {
             return (currentUserRole === 'supervisor');
+          } else if (d.targetUserId === 'all_warehouse_keepers') {
+            return (currentUserRole === 'warehouse_keeper');
           } else {
             // Strictly match currentUserId
             return (currentUserId === d.targetUserId);
@@ -9931,6 +10137,8 @@ if (window._callAudioCtx) {
         recipientBadge = '<span style="background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;">👔 موجه لمدراء الفروع</span>';
       } else if (active.targetUserId === 'all_supervisors') {
         recipientBadge = '<span style="background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;">👥 موجه لمسؤولي الصالة</span>';
+      } else if (active.targetUserId === 'all_warehouse_keepers') {
+        recipientBadge = '<span style="background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;">📦 موجه لأمناء المستودعات</span>';
       } else {
         const tSup = getSupervisorsList().find(s => s.id === active.targetUserId);
         const name = tSup ? tSup.name : (active.targetUserName || active.targetUserId);
@@ -10004,7 +10212,7 @@ if (window._callAudioCtx) {
       if (!bId) bId = currentBranchId;
 
       // Prevent cross-user acknowledgment if directive is personal to someone else
-      if (targetDirective && targetDirective.targetUserId && targetDirective.targetUserId !== 'all' && targetDirective.targetUserId !== 'all_managers' && targetDirective.targetUserId !== 'all_supervisors') {
+      if (targetDirective && targetDirective.targetUserId && targetDirective.targetUserId !== 'all' && targetDirective.targetUserId !== 'all_managers' && targetDirective.targetUserId !== 'all_supervisors' && targetDirective.targetUserId !== 'all_warehouse_keepers') {
         if (currentUserRole !== 'admin' && currentUserId !== targetDirective.targetUserId) {
           alert("عذراً، هذا التوجيه موجه لمشرف آخر.");
           return;
@@ -10109,10 +10317,12 @@ if (window._callAudioCtx) {
         });
       }
 
-      // Privacy filter: Floor supervisors only see directives addressed to them or broadcasts
+      // Privacy filter: Floor supervisors and warehouse keepers only see directives addressed to them or broadcasts
       if (currentUserRole !== 'admin' && currentUserRole !== 'branch_manager') {
         combinedList = combinedList.filter(d => {
-          if (!d.targetUserId || d.targetUserId === 'all' || d.targetUserId === 'all_supervisors') return true;
+          if (!d.targetUserId || d.targetUserId === 'all') return true;
+          if (d.targetUserId === 'all_supervisors') return (currentUserRole === 'supervisor');
+          if (d.targetUserId === 'all_warehouse_keepers') return (currentUserRole === 'warehouse_keeper');
           return (currentUserId && d.targetUserId === currentUserId);
         });
       }
@@ -10150,11 +10360,14 @@ if (window._callAudioCtx) {
                     return '<span style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">👔 مديري الفروع</span>';
                   } else if (d.targetUserId === 'all_supervisors') {
                     return '<span style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">👤 مسؤولي الصالة</span>';
+                  } else if (d.targetUserId === 'all_warehouse_keepers') {
+                    return '<span style="background: #fffbeb; color: #92400e; border: 1px solid #fde68a; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">📦 أمناء المستودعات</span>';
                   } else if (d.targetUserId && d.targetUserId !== 'all') {
                     const tSup = getSupervisorsList().find(s => s.id === d.targetUserId);
                     if (tSup) {
                       const isMgr = tSup.role === 'branch_manager' || (tSup.id && tSup.id.startsWith('mgr_'));
-                      return `<span style="background: #fdf2f8; color: #9d174d; border: 1px solid #fbcfe8; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">${isMgr ? '🏢 المدير:' : '👤 إلى:'} ${escapeHtml(tSup.name)}</span>`;
+                      const isWh = tSup.role === 'warehouse_keeper' || (tSup.id && tSup.id.startsWith('wh_'));
+                      return `<span style="background: #fdf2f8; color: #9d174d; border: 1px solid #fbcfe8; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">${isMgr ? '🏢 المدير:' : (isWh ? '📦 المستودع:' : '👤 إلى:')} ${escapeHtml(tSup.name)}</span>`;
                     }
                   }
                   return '';
@@ -10310,7 +10523,8 @@ if (window._callAudioCtx) {
               if (!document.body.classList.contains('auth-passed') || !currentUserId) return;
               if (targetUser === 'all_managers' && currentUserRole !== 'branch_manager') return;
               if (targetUser === 'all_supervisors' && currentUserRole !== 'supervisor') return;
-              if (targetUser !== 'all_managers' && targetUser !== 'all_supervisors' && targetUser !== currentUserId) return;
+              if (targetUser === 'all_warehouse_keepers' && currentUserRole !== 'warehouse_keeper') return;
+              if (targetUser !== 'all_managers' && targetUser !== 'all_supervisors' && targetUser !== 'all_warehouse_keepers' && targetUser !== currentUserId) return;
             }
             const title = (payload.notification && payload.notification.title) || (payload.data && payload.data.title) || '📢 توجيه إداري';
             const body = (payload.notification && payload.notification.body) || (payload.data && payload.data.body) || '';
@@ -10521,6 +10735,12 @@ if (window._callAudioCtx) {
                   const userObj = getSupervisorsList().find(s => s.id === item.userId);
                   const isSup = item.role === 'supervisor' || (userObj && userObj.role === 'supervisor');
                   if (isSup) {
+                    tokensSet.add(item.token);
+                  }
+                } else if (directive.targetUserId === 'all_warehouse_keepers') {
+                  const userObj = getSupervisorsList().find(s => s.id === item.userId);
+                  const isWh = item.role === 'warehouse_keeper' || (userObj && userObj.role === 'warehouse_keeper') || (item.userId && item.userId.startsWith('wh_'));
+                  if (isWh) {
                     tokensSet.add(item.token);
                   }
                 } else if (directive.targetUserId && directive.targetUserId !== 'all') {

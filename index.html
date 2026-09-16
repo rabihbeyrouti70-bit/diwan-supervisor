@@ -447,6 +447,19 @@
       <button class="filter-btn" onclick="setFilter('done', this)">✅ مكتملة</button>
     </div>
 
+    <!-- OPERATIONAL SCOPE FILTER (ALL / FLOOR / WAREHOUSE) -->
+    <div id="operationalScopeFilterBar" class="no-print" style="display: none; margin-bottom: 12px; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; box-shadow: var(--shadow-sm);">
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 14px;">🎯</span>
+        <span style="font-size: 12px; font-weight: 800; color: var(--secondary);">نطاق المتابعة والمهام:</span>
+      </div>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+        <button type="button" class="btn btn-sm btn-scope-filter active" id="scopeBtnAll" onclick="setOperationalScope('all')" style="font-size: 11.5px; font-weight: 800; padding: 4px 10px; border-radius: 6px; border: 1.5px solid #059669; background: #ecfdf5; color: #065f46; cursor: pointer;">🌐 عرض شامل (الصالة والمستودع)</button>
+        <button type="button" class="btn btn-sm btn-scope-filter" id="scopeBtnFloor" onclick="setOperationalScope('floor')" style="font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: white; color: var(--text); cursor: pointer;">👤 صالة العرض فقط</button>
+        <button type="button" class="btn btn-sm btn-scope-filter" id="scopeBtnWarehouse" onclick="setOperationalScope('warehouse')" style="font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: white; color: var(--text); cursor: pointer;">📦 المستودع والمخازن فقط</button>
+      </div>
+    </div>
+
     <!-- EXCEL-STYLE WORKBOOK SHEETS TAB BAR (ورديات اليوم الواحد في الفرع بنمط إكسل) -->
     <div class="excel-workbook-container no-print" id="excelWorkbookContainer">
       <div class="excel-workbook-header">
@@ -659,6 +672,7 @@
             <label for="inputSupervisorRole">الرتبة / الدور الصلاحي:</label>
             <select id="inputSupervisorRole" class="form-control" style="font-weight: 700;">
               <option value="supervisor">👤 مسؤول صالة (Floor Supervisor)</option>
+              <option value="warehouse_keeper">📦 أمين المستودع (Warehouse Keeper)</option>
               <option value="branch_manager">🏢 مدير فرع (Branch Manager)</option>
               <option value="admin">👑 مدير عام (General Manager)</option>
             </select>
@@ -902,6 +916,15 @@
               <label for="inputCustomSectionIcon">الأيقونة / الرمز:</label>
               <input type="text" id="inputCustomSectionIcon" class="form-control" placeholder="مثال: 🥦 أو 🛒" value="📋">
             </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label for="inputCustomSectionRole">جهة الاختصاص والمسؤولية:</label>
+            <select id="inputCustomSectionRole" class="form-control" style="font-weight: 700;">
+              <option value="floor" selected>👤 صالة العرض (مسؤول الصالة)</option>
+              <option value="warehouse">📦 المستودع والمخازن (أمين المستودع)</option>
+              <option value="all">🌐 شامل (الصالة والمستودع معاً)</option>
+            </select>
           </div>
 
           <div class="form-group" style="margin-bottom: 10px;">
@@ -1648,6 +1671,6 @@
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789240000"></script>
+  <script src="assets/js/app.js?v=1789250000"></script>
 </body>
 </html>
