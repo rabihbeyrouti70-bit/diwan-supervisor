@@ -1188,6 +1188,9 @@
       setElementRoleVisibility(btnManage, isAnyManager, 'inline-flex');
       setElementRoleVisibility(btnShifts, isAnyManager, 'inline-flex');
       setElementRoleVisibility(btnDirHead, isAnyManager, 'inline-flex');
+      const btnSupAlert = document.getElementById('btnSupervisorAlert');
+      const isFloorSupervisor = (activeRole === 'supervisor' || !isAnyManager);
+      setElementRoleVisibility(btnSupAlert, isFloorSupervisor, 'inline-flex');
 
       if (isGeneralManager && typeof listenToHqEvidenceFeed === 'function') {
         listenToHqEvidenceFeed();
@@ -6258,6 +6261,7 @@
             type: 'INCOMING_CALL',
             callData: {
               callId: thisCallId,
+              calleeId: callData.calleeId || currentUserId,
               callerName: callData.callerName || 'الإدارة',
               callerRole: callData.callerRole,
               callerBranch: callData.callerBranch
@@ -6287,6 +6291,7 @@
                 data: {
                   type: 'INCOMING_CALL',
                   callId: thisCallId,
+                  calleeId: callData.calleeId || currentUserId,
                   callerName: callData.callerName || 'الإدارة',
                   url: './?action=accept_call&callId=' + thisCallId
                 }
@@ -7417,6 +7422,366 @@
       }
     }
 
+    /* ============================================================
+       DIRECTIVE & ALERT PHOTO ATTACHMENT & LIGHTBOX VIEWER
+       ============================================================ */
+    let directivePhotoBase64 = null;
+    let directivePhotoMeta = null;
+    const directivePhotosMap = new Map();
+
+    function onDirectivePhotoSelected(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const fileNameEl = document.getElementById('directivePhotoFileName');
+      const previewEl = document.getElementById('directivePhotoPreview');
+      const previewWrap = document.getElementById('directivePhotoPreviewContainer');
+      const statusEl = document.getElementById('directivePhotoStatus');
+
+      if (fileNameEl) fileNameEl.innerText = '⏳ جارٍ ضغط الصورة وإضافة الختم...';
+
+      const branchSel = document.getElementById('directiveBranchSelect');
+      const meta = {
+        branchId: (branchSel && branchSel.value !== 'all') ? branchSel.value : currentBranchId,
+        supervisor: currentSupervisor,
+        taskTitle: 'توجيه إداري'
+      };
+
+      compressAndWatermarkImage(file, meta).then(res => {
+        directivePhotoBase64 = res.dataUrl;
+        directivePhotoMeta = { width: res.width, height: res.height, sizeBytes: res.sizeBytes };
+        if (previewEl) previewEl.src = res.dataUrl;
+        if (previewWrap) previewWrap.style.display = 'block';
+        if (fileNameEl) fileNameEl.innerText = `✅ تم التجهيز (${(res.sizeBytes / 1024).toFixed(1)} KB)`;
+        if (statusEl) {
+          statusEl.innerText = '📷 مرفق صورة';
+          statusEl.style.color = '#059669';
+          statusEl.style.fontWeight = '700';
+        }
+      }).catch(err => {
+        console.error('Directive photo compression error:', err);
+        alert('تعذر معالجة الصورة: ' + (err.message || err));
+        removeDirectivePhoto();
+      });
+    }
+
+    function removeDirectivePhoto() {
+      directivePhotoBase64 = null;
+      directivePhotoMeta = null;
+      const fileInput = document.getElementById('directivePhotoInput');
+      if (fileInput) fileInput.value = '';
+      const previewEl = document.getElementById('directivePhotoPreview');
+      if (previewEl) previewEl.src = '';
+      const previewWrap = document.getElementById('directivePhotoPreviewContainer');
+      if (previewWrap) previewWrap.style.display = 'none';
+      const fileNameEl = document.getElementById('directivePhotoFileName');
+      if (fileNameEl) fileNameEl.innerText = 'لم يتم اختيار صورة';
+      const statusEl = document.getElementById('directivePhotoStatus');
+      if (statusEl) {
+        statusEl.innerText = 'اختياري';
+        statusEl.style.color = 'var(--text-muted)';
+        statusEl.style.fontWeight = 'normal';
+      }
+    }
+
+    function openDirectivePhotoLightbox(photoSrc, caption) {
+      const modal = document.getElementById('directivePhotoLightboxModal');
+      const img = document.getElementById('directiveLightboxImage');
+      const title = document.getElementById('directiveLightboxTitle');
+      const meta = document.getElementById('directiveLightboxMeta');
+      if (!modal || !img) return;
+
+      img.src = photoSrc;
+      if (title && caption) title.innerText = caption;
+      if (meta) meta.innerText = 'انقر خارج الصورة أو زر الإغلاق للعودة';
+
+      document.body.classList.add('modal-open');
+      modal.classList.add('open');
+    }
+
+    function openDirectivePhotoLightboxById(dirId, caption) {
+      const photoSrc = directivePhotosMap.get(dirId);
+      if (!photoSrc) {
+        showToast('الصورة غير متوفرة أو جاري تحميلها.');
+        return;
+      }
+      openDirectivePhotoLightbox(photoSrc, caption);
+    }
+
+    function closeDirectivePhotoLightbox() {
+      const modal = document.getElementById('directivePhotoLightboxModal');
+      if (modal) modal.classList.remove('open');
+      if (!document.querySelector('.modal-overlay.open')) {
+        document.body.classList.remove('modal-open');
+      }
+    }
+
+    /* ============================================================
+       SUPERVISOR FLOOR EMERGENCY ALERT ENGINE (TWO-WAY COMMUNICATION)
+       ============================================================ */
+    let supervisorAlertPhotoBase64 = null;
+    let supervisorAlertMediaRecorder = null;
+    let supervisorAlertAudioChunks = [];
+    let supervisorAlertAudioBase64 = null;
+    let supervisorAlertRecordTimer = null;
+    let supervisorAlertRecordSeconds = 0;
+
+    function openSupervisorAlertModal() {
+      document.body.classList.add('modal-open');
+      removeSupervisorAlertPhoto();
+      cancelSupervisorAlertVoiceRecording();
+      const textInp = document.getElementById('supervisorAlertText');
+      if (textInp) textInp.value = '';
+      const errBox = document.getElementById('supervisorAlertFormError');
+      if (errBox) errBox.innerText = '';
+      const modal = document.getElementById('supervisorAlertModal');
+      if (modal) modal.classList.add('open');
+    }
+
+    function closeSupervisorAlertModal() {
+      cancelSupervisorAlertVoiceRecording();
+      removeSupervisorAlertPhoto();
+      const modal = document.getElementById('supervisorAlertModal');
+      if (modal) modal.classList.remove('open');
+      if (!document.querySelector('.modal-overlay.open')) {
+        document.body.classList.remove('modal-open');
+      }
+    }
+
+    function onSupervisorAlertPhotoSelected(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const fileNameEl = document.getElementById('supervisorAlertPhotoFileName');
+      const previewEl = document.getElementById('supervisorAlertPhotoPreview');
+      const previewWrap = document.getElementById('supervisorAlertPhotoPreviewContainer');
+      const statusEl = document.getElementById('supervisorAlertPhotoStatus');
+
+      if (fileNameEl) fileNameEl.innerText = '⏳ جارٍ تجهيز وضغط الصورة...';
+
+      const meta = {
+        branchId: currentBranchId,
+        supervisor: currentSupervisor,
+        taskTitle: 'نداء صالة عاجل'
+      };
+
+      compressAndWatermarkImage(file, meta).then(res => {
+        supervisorAlertPhotoBase64 = res.dataUrl;
+        if (previewEl) previewEl.src = res.dataUrl;
+        if (previewWrap) previewWrap.style.display = 'block';
+        if (fileNameEl) fileNameEl.innerText = `✅ ${(res.sizeBytes / 1024).toFixed(1)} KB`;
+        if (statusEl) {
+          statusEl.innerText = '📷 مرفق صورة';
+          statusEl.style.color = '#059669';
+          statusEl.style.fontWeight = '700';
+        }
+      }).catch(err => {
+        console.error('Supervisor alert photo error:', err);
+        alert('تعذر معالجة الصورة: ' + (err.message || err));
+        removeSupervisorAlertPhoto();
+      });
+    }
+
+    function removeSupervisorAlertPhoto() {
+      supervisorAlertPhotoBase64 = null;
+      const fileInput = document.getElementById('supervisorAlertPhotoInput');
+      if (fileInput) fileInput.value = '';
+      const previewEl = document.getElementById('supervisorAlertPhotoPreview');
+      if (previewEl) previewEl.src = '';
+      const previewWrap = document.getElementById('supervisorAlertPhotoPreviewContainer');
+      if (previewWrap) previewWrap.style.display = 'none';
+      const fileNameEl = document.getElementById('supervisorAlertPhotoFileName');
+      if (fileNameEl) fileNameEl.innerText = 'لم يتم اختيار صورة';
+      const statusEl = document.getElementById('supervisorAlertPhotoStatus');
+      if (statusEl) {
+        statusEl.innerText = 'اختياري';
+        statusEl.style.color = 'var(--text-muted)';
+        statusEl.style.fontWeight = 'normal';
+      }
+    }
+
+    async function startSupervisorAlertVoiceRecording() {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert("متصفحك لا يدعم تسجيل الصوت المباشر.");
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        supervisorAlertAudioChunks = [];
+        supervisorAlertAudioBase64 = null;
+
+        let mimeType = 'audio/webm';
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        }
+
+        supervisorAlertMediaRecorder = new MediaRecorder(stream, { mimeType });
+        supervisorAlertMediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) supervisorAlertAudioChunks.push(e.data);
+        };
+        supervisorAlertMediaRecorder.onstop = () => {
+          const audioBlob = new Blob(supervisorAlertAudioChunks, { type: mimeType });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            supervisorAlertAudioBase64 = reader.result;
+            const previewAudio = document.getElementById('supervisorAlertVoicePreview');
+            const previewContainer = document.getElementById('supervisorAlertVoicePreviewContainer');
+            if (previewAudio && previewContainer) {
+              previewAudio.src = supervisorAlertAudioBase64;
+              previewContainer.style.display = 'block';
+            }
+          };
+          reader.readAsDataURL(audioBlob);
+          stream.getTracks().forEach(t => t.stop());
+        };
+
+        supervisorAlertMediaRecorder.start(250);
+        supervisorAlertRecordSeconds = 0;
+        updateSupervisorAlertRecordUi(true);
+
+        supervisorAlertRecordTimer = setInterval(() => {
+          supervisorAlertRecordSeconds++;
+          const secStr = String(supervisorAlertRecordSeconds % 60).padStart(2, '0');
+          const minStr = String(Math.floor(supervisorAlertRecordSeconds / 60)).padStart(2, '0');
+          const timerEl = document.getElementById('supervisorAlertVoiceTimer');
+          if (timerEl) timerEl.innerText = `${minStr}:${secStr}`;
+          if (supervisorAlertRecordSeconds >= 60) {
+            stopSupervisorAlertVoiceRecording();
+          }
+        }, 1000);
+      } catch (err) {
+        console.error('Supervisor voice record error:', err);
+        alert("يرجى إعطاء صلاحية الميكروفون لتسجيل الملاحظة الصوتية.");
+      }
+    }
+
+    function stopSupervisorAlertVoiceRecording() {
+      if (supervisorAlertRecordTimer) {
+        clearInterval(supervisorAlertRecordTimer);
+        supervisorAlertRecordTimer = null;
+      }
+      if (supervisorAlertMediaRecorder && supervisorAlertMediaRecorder.state === 'recording') {
+        supervisorAlertMediaRecorder.stop();
+      }
+      updateSupervisorAlertRecordUi(false);
+    }
+
+    function cancelSupervisorAlertVoiceRecording() {
+      if (supervisorAlertRecordTimer) {
+        clearInterval(supervisorAlertRecordTimer);
+        supervisorAlertRecordTimer = null;
+      }
+      if (supervisorAlertMediaRecorder && supervisorAlertMediaRecorder.state === 'recording') {
+        supervisorAlertMediaRecorder.stop();
+      }
+      supervisorAlertAudioBase64 = null;
+      supervisorAlertAudioChunks = [];
+      supervisorAlertRecordSeconds = 0;
+      updateSupervisorAlertRecordUi(false);
+      const previewContainer = document.getElementById('supervisorAlertVoicePreviewContainer');
+      const previewAudio = document.getElementById('supervisorAlertVoicePreview');
+      if (previewAudio) previewAudio.src = '';
+      if (previewContainer) previewContainer.style.display = 'none';
+    }
+
+    function updateSupervisorAlertRecordUi(isRecording) {
+      const btnStart = document.getElementById('btnSupStartRecord');
+      const btnStop = document.getElementById('btnSupStopRecord');
+      const btnCancel = document.getElementById('btnSupCancelRecord');
+      const timerEl = document.getElementById('supervisorAlertVoiceTimer');
+      const statusEl = document.getElementById('supervisorAlertVoiceStatus');
+
+      if (isRecording) {
+        if (btnStart) btnStart.style.display = 'none';
+        if (btnStop) btnStop.style.display = 'inline-flex';
+        if (btnCancel) btnCancel.style.display = 'inline-flex';
+        if (timerEl) { timerEl.style.display = 'inline-block'; timerEl.innerText = '00:00'; }
+        if (statusEl) { statusEl.innerText = '🔴 جارٍ التسجيل...'; statusEl.style.color = '#b91c1c'; statusEl.style.fontWeight = '700'; }
+      } else {
+        if (btnStart) btnStart.style.display = 'inline-flex';
+        if (btnStop) btnStop.style.display = 'none';
+        if (btnCancel) btnCancel.style.display = 'none';
+        if (timerEl) timerEl.style.display = 'none';
+        if (statusEl) {
+          statusEl.innerText = supervisorAlertAudioBase64 ? '🎙️ يوجد تسجيل صوتي' : 'اختياري';
+          statusEl.style.color = supervisorAlertAudioBase64 ? '#059669' : 'var(--text-muted)';
+        }
+      }
+    }
+
+    async function sendSupervisorFloorAlert() {
+      const catSel = document.getElementById('supervisorAlertCategory');
+      const textInp = document.getElementById('supervisorAlertText');
+      const errBox = document.getElementById('supervisorAlertFormError');
+      const sendBtn = document.getElementById('btnSendSupervisorAlert');
+
+      const category = catSel ? catSel.value : 'نداء عاجل';
+      const text = textInp ? textInp.value.trim() : '';
+
+      if (!text && !supervisorAlertAudioBase64 && !supervisorAlertPhotoBase64) {
+        if (errBox) errBox.innerText = 'يرجى كتابة نص للبلاغ أو إرفاق صورة أو تسجيل ملاحظة صوتية واحدة على الأقل.';
+        return;
+      }
+
+      if (errBox) errBox.innerText = '';
+      if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.innerText = '⏳ جارٍ إرسال النداء للإدارة...';
+      }
+
+      const dirId = 'dir_' + Date.now();
+      const now = new Date();
+      const timeFormatted = 'اليوم ' + now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+      const bId = currentBranchId || 'rawche';
+      const bObj = getBranchById(bId);
+      const branchName = bObj ? bObj.nameAr : bId;
+
+      const directiveObj = {
+        id: dirId,
+        branchId: bId,
+        targetUserId: 'all_managers',
+        targetUserName: 'مدراء الفروع والإدارة العامة',
+        senderRole: currentUserRole || 'supervisor',
+        senderName: currentSupervisor || 'مسؤول الصالة',
+        senderId: currentUserId || 'supervisor',
+        priority: 'urgent',
+        category: category,
+        text: `[🚨 بلاغ صالة: ${category}] ${text}`,
+        audioBase64: supervisorAlertAudioBase64 || '',
+        audioDuration: supervisorAlertRecordSeconds || 0,
+        photoBase64: supervisorAlertPhotoBase64 || '',
+        createdAt: now.toISOString(),
+        timeFormatted: timeFormatted,
+        acknowledged: false,
+        acknowledgedBy: '',
+        acknowledgedAt: ''
+      };
+
+      // Push to Firebase RTDB under current branch directives
+      if (firebaseDb) {
+        firebaseDb.ref('branches/' + bId + '/directives/' + dirId)
+          .set(directiveObj)
+          .catch(e => console.warn('Floor alert push failed:', e));
+      }
+
+      // Also update local memory cache
+      if (!memoryDirectivesCache[bId]) memoryDirectivesCache[bId] = [];
+      memoryDirectivesCache[bId].unshift(directiveObj);
+
+      // Dispatch FCM push to managers
+      dispatchFcmPush(directiveObj, [bId]);
+
+      showToast(`🚨 تم إرسال النداء والبلاغ العاجل لإدارة فرع ${branchName} والإدارة العامة بنجاح!`);
+
+      if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.innerText = '🚨 إرسال النداء وتنبيه الإدارة فوراً';
+      }
+
+      closeSupervisorAlertModal();
+      checkAndRenderActiveDirectives();
+    }
+
     // Modal UI & Dropdown management
     
     /* ============================================================
@@ -7645,6 +8010,36 @@
     let activeIncomingFallbackRef = null;
     let outgoingTargetSupId = null;
     let pendingIceCandidatesQueue = [];
+    let callDisconnectGraceTimer = null;
+
+    function handleCallNetworkInterruption() {
+      if (!isCallEstablished) return;
+      if (callDisconnectGraceTimer) return;
+
+      console.warn('⚠️ [WebRTC] Call disconnected or interrupted, granting 6s grace period for reconnection...');
+      showToast('⚠️ تذبذب في الاتصال، جارٍ محاولة الاستعادة تلقائياً...');
+
+      callDisconnectGraceTimer = setTimeout(() => {
+        callDisconnectGraceTimer = null;
+        if (activePeerConnection) {
+          const cState = activePeerConnection.connectionState;
+          const iState = activePeerConnection.iceConnectionState;
+          if (['disconnected', 'failed', 'closed'].includes(cState) || ['disconnected', 'failed', 'closed'].includes(iState)) {
+            console.warn('🚨 [WebRTC] Reconnection timed out after 6s. Hanging up.');
+            hangupCurrentCall('connection_lost');
+          }
+        }
+      }, 6000);
+    }
+
+    function handleCallNetworkRestored() {
+      if (callDisconnectGraceTimer) {
+        clearTimeout(callDisconnectGraceTimer);
+        callDisconnectGraceTimer = null;
+        console.log('✅ [WebRTC] Call network connection re-established within grace period!');
+        showToast('✅ تم استعادة الاتصال واستقرار المكالمة!');
+      }
+    }
 
     // Ensure any dangling microphone tracks are completely terminated on startup / page unload
     function terminateDanglingMicrophoneStreams() {
@@ -7932,23 +8327,33 @@
 
         
         activePeerConnection.oniceconnectionstatechange = () => {
-          if (['disconnected', 'failed', 'closed'].includes(activePeerConnection.iceConnectionState)) {
-             if (isCallEstablished) hangupCurrentCall('connection_lost');
+          if (!activePeerConnection) return;
+          const state = activePeerConnection.iceConnectionState;
+          if (state === 'connected' || state === 'completed') {
+            handleCallNetworkRestored();
+          } else if (state === 'disconnected') {
+            handleCallNetworkInterruption();
+          } else if (state === 'failed' || state === 'closed') {
+            if (isCallEstablished) hangupCurrentCall('connection_lost');
           }
         };
-activePeerConnection.onconnectionstatechange = () => {
-          console.log(' Caller connectionState:', activePeerConnection ? activePeerConnection.connectionState : 'null');
-          if (activePeerConnection) {
-            if (activePeerConnection.connectionState === 'connected') {
-              console.log(' Full-duplex audio connected on caller side!');
-              const remoteAudio = document.getElementById('remoteAudioElement');
-              if (remoteAudio && remoteAudio.paused) {
-                remoteAudio.play().catch(() => {});
-              }
-            } else if (activePeerConnection.connectionState === 'disconnected' || activePeerConnection.connectionState === 'failed') {
-              if (isCallEstablished) {
-                hangupCurrentCall('connection_lost');
-              }
+
+        activePeerConnection.onconnectionstatechange = () => {
+          if (!activePeerConnection) return;
+          const state = activePeerConnection.connectionState;
+          console.log(' Caller connectionState:', state);
+          if (state === 'connected') {
+            handleCallNetworkRestored();
+            console.log(' Full-duplex audio connected on caller side!');
+            const remoteAudio = document.getElementById('remoteAudioElement');
+            if (remoteAudio && remoteAudio.paused) {
+              remoteAudio.play().catch(() => {});
+            }
+          } else if (state === 'disconnected') {
+            handleCallNetworkInterruption();
+          } else if (state === 'failed' || state === 'closed') {
+            if (isCallEstablished) {
+              hangupCurrentCall('connection_lost');
             }
           }
         };
@@ -8251,26 +8656,36 @@ activePeerConnection.onconnectionstatechange = () => {
 
       
         activePeerConnection.oniceconnectionstatechange = () => {
-          if (['disconnected', 'failed', 'closed'].includes(activePeerConnection.iceConnectionState)) {
-             if (isCallEstablished) hangupCurrentCall('connection_lost');
+          if (!activePeerConnection) return;
+          const state = activePeerConnection.iceConnectionState;
+          if (state === 'connected' || state === 'completed') {
+            handleCallNetworkRestored();
+          } else if (state === 'disconnected') {
+            handleCallNetworkInterruption();
+          } else if (state === 'failed' || state === 'closed') {
+            if (isCallEstablished) hangupCurrentCall('connection_lost');
           }
         };
-activePeerConnection.onconnectionstatechange = () => {
-        console.log(' Callee connectionState:', activePeerConnection ? activePeerConnection.connectionState : 'null');
-        if (activePeerConnection) {
-          if (activePeerConnection.connectionState === 'connected') {
+
+        activePeerConnection.onconnectionstatechange = () => {
+          if (!activePeerConnection) return;
+          const state = activePeerConnection.connectionState;
+          console.log(' Callee connectionState:', state);
+          if (state === 'connected') {
+            handleCallNetworkRestored();
             console.log(' Full-duplex audio connected on callee side!');
             const remoteAudio = document.getElementById('remoteAudioElement');
             if (remoteAudio && remoteAudio.paused) {
               remoteAudio.play().catch(() => {});
             }
-          } else if (activePeerConnection.connectionState === 'disconnected' || activePeerConnection.connectionState === 'failed') {
+          } else if (state === 'disconnected') {
+            handleCallNetworkInterruption();
+          } else if (state === 'failed' || state === 'closed') {
             if (isCallEstablished) {
               hangupCurrentCall('connection_lost');
             }
           }
-        }
-      };
+        };
 
       // Fetch caller offer if not present on pending object
       let offer = pendingIncomingCallObj.offer;
@@ -8844,6 +9259,10 @@ activePeerConnection.onconnectionstatechange = () => {
         clearInterval(callTimerInterval);
         callTimerInterval = null;
       }
+      if (callDisconnectGraceTimer) {
+        clearTimeout(callDisconnectGraceTimer);
+        callDisconnectGraceTimer = null;
+      }
       callSecondsCount = 0;
       updateCallDurationDisplay();
 
@@ -8938,6 +9357,7 @@ if (window._callAudioCtx) {
       populateDirectiveBranchSelect();
       populateDirectiveSupervisorSelect('all');
       cancelDirectiveAudioRecording();
+      removeDirectivePhoto();
 
       const textInp = document.getElementById('directiveInputText');
       if (textInp) textInp.value = '';
@@ -8974,6 +9394,7 @@ if (window._callAudioCtx) {
         directiveModalLiveInterval = null;
       }
       cancelDirectiveAudioRecording();
+      removeDirectivePhoto();
       const modal = document.getElementById('adminDirectiveModal');
       if (modal) modal.classList.remove('open');
       document.body.classList.remove('modal-open');
@@ -9265,8 +9686,8 @@ if (window._callAudioCtx) {
       const priority = prioSel ? prioSel.value : 'urgent';
       const text = textInp ? textInp.value.trim() : '';
 
-      if (!text && !directiveAudioBase64) {
-        if (errBox) errBox.innerText = 'يرجى كتابة نص للتوجيه أو تسجيل ملاحظة صوتية واحدة على الأقل.';
+      if (!text && !directiveAudioBase64 && !directivePhotoBase64) {
+        if (errBox) errBox.innerText = 'يرجى كتابة نص للتوجيه أو تسجيل ملاحظة صوتية أو إرفاق صورة واحدة على الأقل.';
         return;
       }
 
@@ -9301,6 +9722,7 @@ if (window._callAudioCtx) {
         text: text,
         audioBase64: directiveAudioBase64 || '',
         audioDuration: directiveAudioDuration || 0,
+        photoBase64: directivePhotoBase64 || '',
         createdAt: now.toISOString(),
         timeFormatted: timeFormatted,
         acknowledged: false,
@@ -9325,8 +9747,14 @@ if (window._callAudioCtx) {
         const branchDirectiveObj = Object.assign({}, directiveObj, { branchId: bId });
         const key = 'diwan_directives_' + bId + '_' + currentDate;
         const curList = safeJsonParse(safeGetItem(key), []);
-        curList.unshift(branchDirectiveObj);
-        safeSetItem(key, JSON.stringify(curList.slice(0, 30)));
+        
+        // Sanitize for localStorage to prevent quota limits (in-memory cache has full media)
+        const lightObj = Object.assign({}, branchDirectiveObj);
+        if (lightObj.audioBase64 && lightObj.audioBase64.length > 200) lightObj.audioBase64 = 'has_audio';
+        if (lightObj.photoBase64 && lightObj.photoBase64.length > 200) lightObj.photoBase64 = 'has_photo';
+        curList.unshift(lightObj);
+        safeSetItem(key, JSON.stringify(curList.slice(0, 25)));
+
         if (!memoryDirectivesCache[bId]) memoryDirectivesCache[bId] = [];
         memoryDirectivesCache[bId].unshift(branchDirectiveObj);
 
@@ -9348,6 +9776,7 @@ if (window._callAudioCtx) {
       }
 
       cancelDirectiveAudioRecording();
+      removeDirectivePhoto();
       if (textInp) textInp.value = '';
       switchDirectiveTab('log');
       renderDirectivesHistoryList();
@@ -9390,7 +9819,13 @@ if (window._callAudioCtx) {
           memoryDirectivesCache[bId] = list;
 
           const key = 'diwan_directives_' + bId + '_' + currentDate;
-          safeSetItem(key, JSON.stringify(list.slice(0, 40)));
+          const sanitizedList = list.slice(0, 25).map(item => {
+            const copy = Object.assign({}, item);
+            if (copy.audioBase64 && copy.audioBase64.length > 200) copy.audioBase64 = 'has_audio';
+            if (copy.photoBase64 && copy.photoBase64.length > 200) copy.photoBase64 = 'has_photo';
+            return copy;
+          });
+          safeSetItem(key, JSON.stringify(sanitizedList));
 
           // Immediately alert any unacknowledged directive targeted to this user
           // STRICT AUTH & RECIPIENT GUARD
@@ -9402,7 +9837,7 @@ if (window._callAudioCtx) {
                     return; // Don't alarm the sender themselves
                   }
                   if (d.targetUserId === 'all_managers') {
-                    if (currentUserRole === 'branch_manager') triggerDirectiveAlert(d);
+                    if (currentUserRole === 'branch_manager' || currentUserRole === 'admin') triggerDirectiveAlert(d);
                   } else if (d.targetUserId === 'all_supervisors') {
                     if (currentUserRole === 'supervisor') triggerDirectiveAlert(d);
                   } else if (!d.targetUserId || d.targetUserId === 'all') {
@@ -9502,6 +9937,10 @@ if (window._callAudioCtx) {
         recipientBadge = `<span style="background: #fef08a; color: #854d0e; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">👤 موجه إليك شخصياً (${escapeHtml(name)})</span>`;
       }
 
+      if (active.photoBase64 && active.photoBase64.startsWith('data:image')) {
+        directivePhotosMap.set(active.id, active.photoBase64);
+      }
+
       bannerContainer.style.display = 'block';
       bannerContainer.innerHTML = `
         <div class="directive-banner-card ${pClass}">
@@ -9517,6 +9956,12 @@ if (window._callAudioCtx) {
             </button>
           </div>
           ${active.text ? `<div class="directive-text-content">${escapeHtml(active.text)}</div>` : ''}
+          ${(active.photoBase64 && active.photoBase64.startsWith('data:image')) ? `
+            <div style="margin-top: 8px;">
+              <span style="font-size: 11.5px; font-weight: 700; display: block; margin-bottom: 4px;">📷 صورة مرفقة (اضغط للتكبير):</span>
+              <img src="${active.photoBase64}" alt="صورة مرفقة" onclick="openDirectivePhotoLightboxById('${escapeSingleQuotes(active.id)}', 'توجيه إداري من ${escapeSingleQuotes(active.senderName || '')}')" style="max-height: 120px; border-radius: 6px; border: 1.5px solid rgba(255,255,255,0.4); cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: transform 0.15s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+            </div>
+          ` : ''}
           ${active.audioBase64 ? `
             <div class="directive-audio-player-wrap">
               <span style="font-size: 12px; font-weight: 700;">🎙️ استماع للملاحظة الصوتية (${active.audioDuration || 0} ثانية):</span>
@@ -9689,6 +10134,9 @@ if (window._callAudioCtx) {
           ? '🔴 عاجل'
           : (d.priority === 'important' ? '🟡 هام' : '🟢 عادي');
         const bName = d.branchNameAr || (getBranchById(d.branchId) ? getBranchById(d.branchId).nameAr : '');
+        if (d.photoBase64 && d.photoBase64.startsWith('data:image')) {
+          directivePhotosMap.set(d.id, d.photoBase64);
+        }
 
         return `
           <div style="background: white; border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: var(--shadow-sm); transition: all 0.2s ease;">
@@ -9731,6 +10179,12 @@ if (window._callAudioCtx) {
               </div>
             </div>
             ${d.text ? `<div style="font-size: 13px; color: var(--text); background: #f8fafc; padding: 8px 10px; border-radius: 6px; margin: 6px 0; border: 1px solid #f1f5f9;">${escapeHtml(d.text)}</div>` : ''}
+            ${(d.photoBase64 && d.photoBase64.startsWith('data:image')) ? `
+              <div style="margin-top: 6px;">
+                <span style="font-size: 11px; color: var(--text-muted); font-weight: 700; display: block; margin-bottom: 2px;">📷 صورة مرفقة (اضغط للتكبير):</span>
+                <img src="${d.photoBase64}" alt="صورة مرفقة" onclick="openDirectivePhotoLightboxById('${escapeSingleQuotes(d.id)}', 'صورة مرفقة - ${escapeSingleQuotes(d.senderName || '')}')" style="max-height: 90px; border-radius: 6px; border: 1px solid #cbd5e1; cursor: pointer; box-shadow: var(--shadow-sm); transition: transform 0.15s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+              </div>
+            ` : ''}
             ${d.audioBase64 ? `
               <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 11px; color: var(--text-muted); font-weight: 700;">🎙️ تسجيل صوتي (${d.audioDuration || 0}ث):</span>

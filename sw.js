@@ -1,5 +1,5 @@
-// Diwan Market Floor Supervisor - Unified Service Worker (PWA + FCM Web Push + Background Calling v24)
-const CACHE_NAME = 'diwan-supervisor-v24';
+// Diwan Market Floor Supervisor - Unified Service Worker (PWA + FCM Web Push + Background Calling v25)
+const CACHE_NAME = 'diwan-supervisor-v25';
 
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
@@ -98,6 +98,7 @@ self.addEventListener('message', (event) => {
       data: {
         type: 'INCOMING_CALL',
         callId: callId,
+        calleeId: callData.calleeId || '',
         callerName: callerName,
         url: './?action=accept_call&callId=' + callId
       }
@@ -149,6 +150,7 @@ try {
         data: {
           type: 'INCOMING_CALL',
           callId: callId,
+          calleeId: data.calleeId || '',
           callerName: callerName,
           url: './?action=accept_call&callId=' + callId
         }
@@ -186,11 +188,35 @@ self.addEventListener('notificationclick', (event) => {
 
   if (isIncomingCall && action === 'reject_call') {
     event.waitUntil(
-      clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-        for (const client of clientList) {
-          client.postMessage({ type: 'SW_REJECT_CALL', callId: notificationData.callId });
+      (async () => {
+        // 1. Notify any open client windows
+        try {
+          const clientList = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+          for (const client of clientList) {
+            client.postMessage({ type: 'SW_REJECT_CALL', callId: notificationData.callId });
+          }
+        } catch (cErr) {}
+
+        // 2. Direct REST update to Firebase RTDB in case the app tab is completely closed
+        const callId = notificationData.callId;
+        const calleeId = notificationData.calleeId;
+        if (callId) {
+          try {
+            await fetch(`https://diwan-supervisor-default-rtdb.asia-southeast1.firebasedatabase.app/calls/${callId}.json`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'rejected', endedAt: Date.now() })
+            });
+            if (calleeId) {
+              await fetch(`https://diwan-supervisor-default-rtdb.asia-southeast1.firebasedatabase.app/incoming_calls/${calleeId}.json`, {
+                method: 'DELETE'
+              });
+            }
+          } catch (restErr) {
+            console.warn('[sw.js] Direct REST reject update failed:', restErr);
+          }
         }
-      })
+      })()
     );
     return;
   }
