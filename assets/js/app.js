@@ -1312,10 +1312,18 @@
         const savedName = localStorage.getItem('diwan_saved_user_name');
         if (savedName) currentSupervisor = savedName;
         const savedRole = localStorage.getItem('diwan_saved_user_role');
-        if (savedRole) currentUserRole = savedRole;
+        if (savedRole) {
+          currentUserRole = savedRole;
+          if (currentUserRole === 'warehouse_keeper') {
+            activeOperationalScope = 'warehouse';
+            activeShiftView = 'warehouse_daily';
+          } else if (currentUserRole === 'supervisor') {
+            activeOperationalScope = 'floor';
+          }
+        }
         const savedBranch = localStorage.getItem('diwan_saved_branch_id');
         if (savedBranch) currentBranchId = savedBranch;
-        console.log('📱 [Device Identity] Restored active supervisor session:', currentUserId, currentSupervisor);
+        console.log('📱 [Device Identity] Restored active supervisor session:', currentUserId, currentSupervisor, currentUserRole);
       }
     } catch (e) {}
 
@@ -1398,6 +1406,26 @@
       // 5. Live Presence Strip
       if (!isAnyManager && presStrip) {
         setElementRoleVisibility(presStrip, false);
+      }
+
+      // 6. Hard-lock operational scope and views by role:
+      if (activeRole === 'warehouse_keeper') {
+        activeOperationalScope = 'warehouse';
+        activeShiftView = 'warehouse_daily';
+      } else if (activeRole === 'supervisor') {
+        activeOperationalScope = 'floor';
+        if (activeShiftView === 'warehouse_daily') {
+          activeShiftView = currentShiftType || 'morning';
+        }
+      }
+
+      // 7. Dynamic User Card Label
+      const supCardLabel = document.getElementById('activeSupervisorCardLabel');
+      if (supCardLabel) {
+        if (activeRole === 'warehouse_keeper') supCardLabel.innerText = '📦 أمين المستودع والفرع الحالي المسجل:';
+        else if (activeRole === 'branch_manager') supCardLabel.innerText = '🏢 مدير الفرع المسجل:';
+        else if (activeRole === 'admin') supCardLabel.innerText = '👑 المدير العام (الإدارة المركزية):';
+        else supCardLabel.innerText = '🛒 مسؤول الصالة والفرع الحالي المسجل:';
       }
     }
 
@@ -1973,13 +2001,34 @@
       });
 
       const currentVal = select.value;
-      select.innerHTML = filtered.map(s => {
-        let prefix = '👤 ';
-        if (s.id === 'chairman' || (s.name && s.name.includes('رئيس مجلس الإدارة'))) prefix = '🏛️ ';
-        else if (s.role === 'admin' || s.id === 'admin') prefix = '👑 ';
-        else if (s.role === 'branch_manager') prefix = '🏢 ';
-        return `<option value="${escapeHtml(s.id)}">${prefix}${escapeHtml(s.name)}</option>`;
-      }).join('');
+      const admins = filtered.filter(s => s.role === 'admin' || s.id === 'admin' || s.id === 'chairman');
+      const managers = filtered.filter(s => s.role === 'branch_manager' || (s.id && s.id.startsWith('mgr_')));
+      const floorSups = filtered.filter(s => (s.role === 'supervisor' || !s.role) && !admins.includes(s) && !managers.includes(s) && !(s.id && s.id.startsWith('wh_')));
+      const whKeepers = filtered.filter(s => s.role === 'warehouse_keeper' || (s.id && s.id.startsWith('wh_')));
+
+      let html = '';
+      if (admins.length > 0) {
+        html += `<optgroup label="👑 الإدارة المركزية العليا">` +
+          admins.map(s => `<option value="${escapeHtml(s.id)}">${s.id === 'chairman' ? '🏛️' : '👑'} ${escapeHtml(s.name)}</option>`).join('') +
+          `</optgroup>`;
+      }
+      if (managers.length > 0) {
+        html += `<optgroup label="🏢 إدارة الفرع">` +
+          managers.map(s => `<option value="${escapeHtml(s.id)}">🏢 ${escapeHtml(s.name)}</option>`).join('') +
+          `</optgroup>`;
+      }
+      if (floorSups.length > 0) {
+        html += `<optgroup label="🛒 مسؤولو الصالة (Floor Supervisors)">` +
+          floorSups.map(s => `<option value="${escapeHtml(s.id)}">👤 ${escapeHtml(s.name)}</option>`).join('') +
+          `</optgroup>`;
+      }
+      if (whKeepers.length > 0) {
+        html += `<optgroup label="📦 أمناء المستودعات (Warehouse Keepers)">` +
+          whKeepers.map(s => `<option value="${escapeHtml(s.id)}">📦 ${escapeHtml(s.name)}</option>`).join('') +
+          `</optgroup>`;
+      }
+
+      select.innerHTML = html;
 
       if (currentVal && filtered.some(s => s.id === currentVal)) {
         select.value = currentVal;
@@ -2419,10 +2468,22 @@
             syncDeviceActivation();
           }
 
-          // Auto-detect current shift based on clock time
+          // Auto-detect current shift based on clock time and role isolation
           const autoShift = getAutoDetectedShift(currentBranchId);
-          currentShiftType = autoShift;
-          activeShiftView = autoShift;
+          if (currentUserRole === 'warehouse_keeper') {
+            activeOperationalScope = 'warehouse';
+            activeShiftView = 'warehouse_daily';
+            currentShiftType = 'morning';
+          } else if (currentUserRole === 'supervisor') {
+            activeOperationalScope = 'floor';
+            activeShiftView = autoShift;
+            currentShiftType = autoShift;
+          } else {
+            // Managers (admin / branch_manager) default to master scope
+            activeOperationalScope = 'all';
+            currentShiftType = autoShift;
+            activeShiftView = autoShift;
+          }
 
           // Load shift state for this branch & render
           loadStateForCurrentShift();
@@ -2438,7 +2499,10 @@
           }
 
           const b = getBranchById(currentBranchId);
-          showToast("مرحباً بك: " + currentSupervisor + " 👋 - تم فتح " + getShiftName(currentBranchId, autoShift) + " تلقائياً");
+          const welcomeShift = (currentUserRole === 'warehouse_keeper') 
+            ? 'سجل المستودع اليومي' 
+            : getShiftName(currentBranchId, autoShift);
+          showToast("مرحباً بك: " + currentSupervisor + " 👋 - تم فتح " + welcomeShift + " تلقائياً");
         } else {
           failedAttempts++;
           document.getElementById('authPinInput').value = '';
@@ -5225,9 +5289,10 @@
         container.appendChild(card);
       });
 
-      // Informative notice for Evening / Night shifts regarding Warehouse
+      // Informative notice for Evening / Night shifts regarding Warehouse (Managers Only)
+      const isAnyManager = (currentUserRole === 'admin' || currentUserRole === 'branch_manager');
       const hasWarehouseSections = getBranchWarehouseTotalItems(currentBranchId) > 0;
-      if (hasWarehouseSections && (activeShiftView === 'evening' || activeShiftView === 'night')) {
+      if (isAnyManager && hasWarehouseSections && (activeShiftView === 'evening' || activeShiftView === 'night')) {
         const whStats = calculateShiftStats('warehouse_daily');
         const whKeeper = getActiveWarehouseKeepersDisplay();
         const noticeDiv = document.createElement('div');
@@ -5419,6 +5484,15 @@
     }
 
     function setShiftViewMode(mode, btn) {
+      if (currentUserRole === 'supervisor' && mode === 'warehouse_daily') {
+        showToast('🔒 ورقة فحص المستودع مخصصة لأمين المستودع والإدارة فقط.');
+        return;
+      }
+      if (currentUserRole === 'warehouse_keeper' && mode !== 'warehouse_daily' && mode !== 'all') {
+        showToast('🔒 ورديات الصالة مخصصة لمسؤولي الصالة والإدارة فقط.');
+        return;
+      }
+
       activeShiftView = mode;
       if (mode !== 'all' && mode !== 'warehouse_daily') {
         currentShiftType = mode;
@@ -5610,8 +5684,9 @@
         }).join('');
       }
 
-      // 2. Warehouse Single Daily Shift Card (Shown for Warehouse Keepers, Managers, and All Scope)
-      if (hasWarehouseSections && (activeOperationalScope === 'all' || activeOperationalScope === 'warehouse' || currentUserRole === 'warehouse_keeper')) {
+      // 2. Warehouse Single Daily Shift Card (Shown strictly for Warehouse Keeper OR for Managers)
+      const isAnyManager = (currentUserRole === 'admin' || currentUserRole === 'branch_manager');
+      if (hasWarehouseSections && (currentUserRole === 'warehouse_keeper' || (isAnyManager && activeOperationalScope !== 'floor'))) {
         const whStats = calculateShiftStats('warehouse_daily');
         const isWhActive = (activeShiftView === 'warehouse_daily');
         const keeperDisplay = getActiveWarehouseKeepersDisplay();
