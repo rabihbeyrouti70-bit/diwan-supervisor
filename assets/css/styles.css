@@ -1903,9 +1903,11 @@
       background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
       z-index: 999999 !important;
       display: flex !important;
-      align-items: center !important;
+      align-items: flex-start !important;
       justify-content: center !important;
-      padding: 20px !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      padding: 20px 14px !important;
     }
 
         @keyframes shakeAuth {
@@ -1926,9 +1928,11 @@
       border-radius: 20px;
       width: 100%;
       max-width: 400px;
-      padding: 30px 24px;
+      margin: auto !important;
+      padding: 26px 20px;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
       text-align: center;
+      box-sizing: border-box !important;
     }
 
     .auth-icon {
@@ -2543,39 +2547,76 @@
 
       /* 12. PIN AUTH LOCK SCREEN */
       .auth-overlay {
-        padding: 12px max(12px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)) !important;
+        padding: 10px max(10px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)) !important;
         min-height: 100dvh !important;
+        align-items: flex-start !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
       }
       .auth-card {
         width: 100% !important;
-        max-width: 350px !important;
-        padding: 20px 16px !important;
-        border-radius: 18px !important;
-        max-height: 94dvh !important;
+        max-width: 360px !important;
+        margin: auto !important;
+        padding: 16px 14px !important;
+        border-radius: 16px !important;
+        max-height: none !important;
+        box-sizing: border-box !important;
       }
       .auth-logo {
-        height: 40px !important;
-        margin-bottom: 8px !important;
+        height: 38px !important;
+        margin-bottom: 4px !important;
       }
       .auth-title {
-        font-size: 16px !important;
+        font-size: 15.5px !important;
+        margin-bottom: 2px !important;
+      }
+      .auth-subtitle {
+        font-size: 11px !important;
+        margin-bottom: 8px !important;
+      }
+      #securityVersionTag {
+        font-size: 10.5px !important;
+        padding: 4px 8px !important;
+        margin-bottom: 8px !important;
+      }
+      .auth-card .form-group {
+        margin-bottom: 8px !important;
+      }
+      .auth-card .form-group label {
+        font-size: 12px !important;
+        margin-bottom: 3px !important;
+      }
+      .auth-card .form-control {
+        padding: 6px 10px !important;
+        font-size: 13px !important;
+        min-height: 36px !important;
       }
       .pin-input {
-        min-height: 48px !important;
-        font-size: 24px !important;
-        border-radius: 12px !important;
+        min-height: 42px !important;
+        font-size: 20px !important;
+        letter-spacing: 10px !important;
+        padding: 6px 10px !important;
+        margin-bottom: 6px !important;
+        border-radius: 10px !important;
       }
       .keypad-grid {
-        gap: 8px !important;
+        gap: 6px !important;
+        margin-bottom: 8px !important;
       }
       .key-btn {
-        min-height: 52px !important;
-        font-size: 22px !important;
-        border-radius: 12px !important;
+        min-height: 46px !important;
+        font-size: 20px !important;
+        border-radius: 10px !important;
         touch-action: manipulation !important;
+        padding: 6px 2px !important;
       }
       .key-btn:active {
         transform: scale(0.93) !important;
+      }
+      .auth-error {
+        font-size: 12px !important;
+        min-height: 16px !important;
+        margin-bottom: 6px !important;
       }
 
       /* 13. TOAST NOTIFICATIONS */
@@ -2618,34 +2659,70 @@
       .admin-grid-btn .btn-text {
         font-size: 11px !important;
       }
-    }
-
-    @media (max-height: 680px) and (max-width: 480px) {
       .auth-card {
-        padding: 12px 12px !important;
-      }
-      .auth-logo {
-        height: 34px !important;
-        margin-bottom: 4px !important;
-      }
-      .auth-title {
-        font-size: 14.5px !important;
-      }
-      .auth-subtitle {
-        font-size: 9.5px !important;
-        margin-bottom: 6px !important;
-      }
-      .pin-input {
-        min-height: 40px !important;
-        font-size: 18px !important;
-        margin-bottom: 4px !important;
-      }
-      .keypad-grid {
-        gap: 5px !important;
+        padding: 12px 10px !important;
       }
       .key-btn {
         min-height: 42px !important;
         font-size: 18px !important;
+      }
+    }
+
+    @media (max-height: 740px) {
+      .auth-overlay {
+        padding-top: 8px !important;
+        padding-bottom: 16px !important;
+      }
+      .auth-card {
+        padding: 10px 10px !important;
+      }
+      .auth-logo {
+        height: 28px !important;
+        margin-bottom: 2px !important;
+      }
+      .auth-title {
+        font-size: 13.5px !important;
+        margin-bottom: 2px !important;
+      }
+      .auth-subtitle {
+        display: none !important;
+      }
+      #securityVersionTag {
+        font-size: 9.5px !important;
+        padding: 2px 6px !important;
+        margin-bottom: 4px !important;
+      }
+      .auth-card .form-group {
+        margin-bottom: 4px !important;
+      }
+      .auth-card .form-group label {
+        font-size: 10.5px !important;
+        margin-bottom: 1px !important;
+      }
+      .auth-card .form-control {
+        padding: 4px 8px !important;
+        font-size: 11.5px !important;
+        min-height: 30px !important;
+      }
+      .pin-input {
+        min-height: 34px !important;
+        font-size: 17px !important;
+        padding: 2px 6px !important;
+        margin-bottom: 4px !important;
+      }
+      .keypad-grid {
+        gap: 4px !important;
+        margin-bottom: 4px !important;
+      }
+      .key-btn {
+        min-height: 38px !important;
+        font-size: 17px !important;
+        padding: 4px 2px !important;
+      }
+      .auth-error {
+        font-size: 11px !important;
+        min-height: 14px !important;
+        margin-bottom: 2px !important;
       }
     }
 
