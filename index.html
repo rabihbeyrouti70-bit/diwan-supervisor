@@ -100,7 +100,7 @@
     })();
   </script>
 
-  <link rel="stylesheet" href="assets/css/styles.css?v=1789320000">
+  <link rel="stylesheet" href="assets/css/styles.css?v=1789330000">
 </head>
 <body>
 
@@ -222,6 +222,10 @@
             🏢 <span class="btn-full-text">ملخص الفروع</span><span class="btn-mobile-text" style="display: none;">الملخص</span>
           </button>
 
+          <button id="btnExecutiveDateReport" class="btn btn-sm role-hidden" data-role-hidden="true" onclick="openExecutiveDateReportModal()" style="display: none; background: linear-gradient(135deg, #7c3aed, #6d28d9); color: white; border: 1px solid #5b21b6; font-weight: 800; align-items: center; gap: 4px;" title="تقرير الإنجازات ونسب الأداء الزمني (بين تاريخين)">
+            📊 <span class="btn-full-text">تقرير الإنجازات</span><span class="btn-mobile-text" style="display: none;">الإنجازات</span>
+          </button>
+
           <button id="btnHqEvidenceGallery" class="btn btn-sm role-hidden" data-role-hidden="true" onclick="openEvidenceGalleryModal()" style="display: none; background: #0284c7; color: white; border: 1px solid #0369a1; font-weight: 800; align-items: center; gap: 4px;" title="معرض صور التوثيق الميداني لكافة الفروع">
             📸 <span class="btn-full-text">معرض الصور</span><span class="btn-mobile-text" style="display: none;">الصور</span><span id="hqEvidenceCountBadge" style="background: #e0f2fe; color: #0369a1; padding: 1px 6px; border-radius: 999px; font-size: 11px; margin-inline-start: 4px; font-weight: 900;">0</span>
           </button>
@@ -296,6 +300,11 @@
           <span class="btn-icon">🏢</span>
           <span class="btn-text">ملخص الفروع المركزية</span>
           <span class="btn-sub">متابعة لحظية وشاملة لكافة الفروع</span>
+        </button>
+        <button type="button" class="admin-grid-btn btn-exec-report" id="btnAdminExecutiveReport" onclick="openExecutiveDateReportModal()" style="border-color: #7c3aed; background: linear-gradient(180deg, rgba(124,58,237,0.06) 0%, rgba(124,58,237,0.01) 100%);">
+          <span class="btn-icon">📊</span>
+          <span class="btn-text">تقرير الإنجازات الزمني (بين تاريخين)</span>
+          <span class="btn-sub">تحليل ومقارنة نسب إنجاز الفروع ومؤشرات الأداء لفترة محددة</span>
         </button>
         <button type="button" class="admin-grid-btn btn-sups" onclick="openSupervisorsModal()">
           <span class="btn-icon">👥</span>
@@ -1040,6 +1049,83 @@
     </div>
   </div>
 
+  <!-- EXECUTIVE DATE-RANGE ACHIEVEMENT REPORT MODAL (GM & CHAIRMAN EXCLUSIVE) -->
+  <div class="modal-overlay" id="executiveDateReportModal" role="dialog" aria-modal="true" aria-labelledby="executiveDateReportModalTitle">
+    <div class="modal-card exec-report-modal-card" style="max-width: 960px; width: 95%; max-height: 92vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #4c1d95, #6d28d9); color: white; border-radius: 12px 12px 0 0; padding: 14px 18px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <img src="diwan.PNG" alt="ديوان ماركت" class="modal-logo" style="height: 38px; border-radius: 6px; background: white; padding: 2px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <h3 class="modal-title" id="executiveDateReportModalTitle" style="color: white; margin: 0; font-size: 16px; font-weight: 800;">📊 تقرير نسب الإنجاز ومؤشرات الأداء (بين تاريخين)</h3>
+              <span style="background: rgba(255,255,255,0.2); color: #fef08a; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(254,240,138,0.4);">🔒 سري - الإدارة العليا</span>
+            </div>
+            <span style="font-size: 11.5px; color: #e9d5ff;">مخصص حصراً: رئيس مجلس الإدارة (غسان أيوب) والمدير العام (علي عبد العال)</span>
+          </div>
+        </div>
+        <button class="close-btn" onclick="closeExecutiveDateReportModal()" aria-label="إغلاق النافذة" style="color: white; font-size: 24px;">&times;</button>
+      </div>
+
+      <!-- FILTER CONTROLS BAR -->
+      <div class="exec-report-filter-bar no-print" style="background: var(--card-bg, #f8fafc); border-bottom: 1px solid var(--border); padding: 14px 18px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: flex-end;">
+          <div>
+            <label for="execReportFromDate" style="display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; color: var(--text);">📅 من تاريخ:</label>
+            <input type="date" id="execReportFromDate" class="form-control" style="font-size: 13px; font-weight: 700; width: 100%;">
+          </div>
+          <div>
+            <label for="execReportToDate" style="display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; color: var(--text);">📅 إلى تاريخ:</label>
+            <input type="date" id="execReportToDate" class="form-control" style="font-size: 13px; font-weight: 700; width: 100%;">
+          </div>
+          <div>
+            <label for="execReportBranchSelect" style="display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; color: var(--text);">🏢 تحديد الفرع:</label>
+            <select id="execReportBranchSelect" class="form-control" style="font-size: 13px; font-weight: 700; width: 100%;">
+              <option value="all">🌐 جميع الفروع (مقارنة وتحليل شامل)</option>
+              <!-- Branches populated dynamically -->
+            </select>
+          </div>
+          <div>
+            <label for="execReportScopeSelect" style="display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; color: var(--text);">🎯 نطاق التقرير:</label>
+            <select id="execReportScopeSelect" class="form-control" style="font-size: 13px; font-weight: 700; width: 100%;">
+              <option value="all">🌐 شامل (صالة العرض + المستودع)</option>
+              <option value="floor">🛒 صالة العرض فقط</option>
+              <option value="warehouse">📦 المستودع فقط</option>
+            </select>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" id="btnGenerateExecReport" class="btn btn-primary" onclick="generateExecutiveDateReport()" style="flex: 1; justify-content: center; background: linear-gradient(135deg, #7c3aed, #6d28d9); border-color: #5b21b6; font-weight: 800; font-size: 13px; padding: 7px 12px;" title="استخراج وتحليل البيانات">
+              ⚡ استخراج
+            </button>
+            <button type="button" id="btnPrintExecReport" class="btn btn-outline-white" onclick="printExecutiveDateReport()" style="color: #059669; border-color: #10b981; font-weight: 800; font-size: 13px; padding: 7px 12px;" title="طباعة أو تصدير PDF">
+              🖨️ طباعة
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL SCROLLABLE BODY -->
+      <div class="modal-body" style="padding: 16px 18px; overflow-y: auto; flex: 1;">
+        <!-- KPI SUMMARY CARDS -->
+        <div id="execReportSummaryCards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 18px;">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- REPORT CONTENT TABS & TABLES -->
+        <div id="execReportContent">
+          <div style="text-align: center; padding: 30px; color: var(--text-muted); font-size: 13px;">
+            ⏳ حدد التواريخ واضغط على زر "استخراج" لعرض تقرير الإنجازات الشامل.
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL FOOTER -->
+      <div class="modal-footer" style="padding: 10px 18px; background: var(--card-bg, #f8fafc); border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11.5px; color: var(--text-muted);" id="execReportFooterMeta">نظام الرقابة المركزي - ديوان ماركت</span>
+        <button type="button" class="btn btn-outline-white" style="color: var(--text); border-color: var(--border); font-weight: 700;" onclick="closeExecutiveDateReportModal()">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
   <!-- CLOUD MESSAGING & WEB PUSH (FCM) CONFIGURATION MODAL -->
   <div class="modal-overlay" id="cloudMessagingModal" role="dialog" aria-modal="true" aria-labelledby="cloudMessagingModalTitle">
     <div class="modal-card" style="max-width: 650px;">
@@ -1699,11 +1785,16 @@
     </div>
   </div>
 
+  <!-- EXECUTIVE DATE REPORT DEDICATED PRINT CONTAINER (Off-screen, displayed only during printing) -->
+  <div id="executiveReportPrintArea" class="executive-print-container" style="display: none;">
+    <!-- Populated dynamically via printExecutiveDateReport() -->
+  </div>
+
   <!-- TOAST NOTIFICATION -->
   <div class="toast" id="appToast">
     <span id="toastMsg">تم التحديث بنجاح</span>
   </div>
 
-  <script src="assets/js/app.js?v=1789320000"></script>
+  <script src="assets/js/app.js?v=1789330000"></script>
 </body>
 </html>

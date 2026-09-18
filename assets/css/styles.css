@@ -3882,6 +3882,77 @@
   }
 }
 
+/* ============================================================
+   EXECUTIVE DATE-RANGE ACHIEVEMENT REPORT STYLES & PRINT ENGINE
+   ============================================================ */
+.exec-report-modal-card {
+  box-shadow: 0 25px 50px -12px rgba(76, 29, 149, 0.25);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+}
+
+.exec-report-filter-bar {
+  transition: all 0.2s ease;
+}
+
+[data-theme="dark"] .exec-report-filter-bar {
+  background: #1e1b4b !important;
+  border-bottom-color: #312e81 !important;
+}
+
+[data-theme="dark"] #executiveDateReportModal .modal-body {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] #executiveDateReportModal .modal-footer {
+  background: #1e1b4b !important;
+  border-top-color: #312e81 !important;
+}
+
+[data-theme="dark"] .exec-kpi-card {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Specific styling for executive report KPI cards on mobile */
+@media (max-width: 640px) {
+  #execReportSummaryCards {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  #execReportSummaryCards > div:last-child {
+    grid-column: span 2;
+  }
+}
+
+/* Dedicated Printing Engine for Executive Reports */
+@media print {
+  body.printing-executive-report {
+    background: white !important;
+    color: black !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  body.printing-executive-report .app-container,
+  body.printing-executive-report .top-header,
+  body.printing-executive-report .modal-overlay,
+  body.printing-executive-report .print-header,
+  body.printing-executive-report .toast,
+  body.printing-executive-report .no-print,
+  body.printing-executive-report [data-role-hidden="true"],
+  body.printing-executive-report #notifPermissionBanner,
+  body.printing-executive-report #directiveAlertBanner {
+    display: none !important;
+  }
+  body.printing-executive-report #executiveReportPrintArea {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    color: black !important;
+  }
+}
+
+
 
 
 

@@ -1351,6 +1351,7 @@
       const activeRole = isAuth ? (role || currentUserRole) : 'locked';
 
       const btnHq = document.getElementById('btnHqOverview');
+      const btnExecDateReport = document.getElementById('btnExecutiveDateReport');
       const btnBranches = document.getElementById('btnManageBranches');
       const adminSwitcher = document.getElementById('adminBranchSwitcher');
       const execPanel = document.getElementById('adminExecutivePanel');
@@ -1367,6 +1368,7 @@
 
       // 1. General Manager ONLY (admin)
       setElementRoleVisibility(btnHq, isGeneralManager, 'inline-flex');
+      setElementRoleVisibility(btnExecDateReport, isGeneralManager, 'inline-flex');
       setElementRoleVisibility(btnBranches, isGeneralManager, 'inline-flex');
       setElementRoleVisibility(adminSwitcher, isGeneralManager, 'flex');
       setElementRoleVisibility(execPanel, isGeneralManager, 'block');
@@ -7879,6 +7881,744 @@
           hqFirebaseListeners.push({ ref, callback });
         });
       }
+    }
+
+    /* ============================================================
+       EXECUTIVE DATE-RANGE ACHIEVEMENT REPORT ENGINE (GM & CHAIRMAN)
+       ============================================================ */
+    let lastGeneratedExecutiveReportData = null;
+
+    function isExecutiveUser() {
+      return (
+        currentUserRole === 'admin' ||
+        (typeof currentUserId !== 'undefined' && currentUserId === 'chairman') ||
+        (typeof currentSupervisor === 'string' && (
+          currentSupervisor.includes('رئيس مجلس الإدارة') ||
+          currentSupervisor.includes('غسان أيوب') ||
+          currentSupervisor.includes('المدير العام') ||
+          currentSupervisor.includes('علي عبد العال')
+        ))
+      );
+    }
+
+    function openExecutiveDateReportModal() {
+      if (!isExecutiveUser()) {
+        showToast('⛔ عذراً، هذا التقرير مخصص حصراً للمدير العام ورئيس مجلس الإدارة');
+        return;
+      }
+      document.body.classList.add('modal-open');
+      const modal = document.getElementById('executiveDateReportModal');
+      if (!modal) return;
+      modal.classList.add('open');
+
+      // Populate branch selector
+      populateExecReportBranchSelect();
+
+      // Initialize default dates: last 7 days to today
+      const fromInput = document.getElementById('execReportFromDate');
+      const toInput = document.getElementById('execReportToDate');
+      const today = currentDate || new Date().toISOString().split('T')[0];
+
+      if (toInput && !toInput.value) {
+        toInput.value = today;
+      }
+      if (fromInput && !fromInput.value) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - 6);
+        fromInput.value = d.toISOString().split('T')[0];
+      }
+
+      // Generate report immediately
+      generateExecutiveDateReport();
+    }
+
+    function closeExecutiveDateReportModal() {
+      const modal = document.getElementById('executiveDateReportModal');
+      if (modal) modal.classList.remove('open');
+      document.body.classList.remove('modal-open');
+    }
+
+    function populateExecReportBranchSelect() {
+      const select = document.getElementById('execReportBranchSelect');
+      if (!select) return;
+      const currentVal = select.value || 'all';
+      const branches = getBranchesList();
+
+      let html = `<option value="all">🌐 جميع الفروع (مقارنة وتحليل شامل)</option>`;
+      branches.forEach(b => {
+        html += `<option value="${escapeHtml(b.id)}">🏢 ${escapeHtml(b.nameAr)} (${escapeHtml(b.location)})</option>`;
+      });
+      select.innerHTML = html;
+      if (branches.some(b => b.id === currentVal) || currentVal === 'all') {
+        select.value = currentVal;
+      }
+    }
+
+    async function generateExecutiveDateReport() {
+      if (!isExecutiveUser()) {
+        showToast('⛔ عذراً، هذا التقرير مخصص حصراً للمدير العام ورئيس مجلس الإدارة');
+        return;
+      }
+
+      const fromDate = document.getElementById('execReportFromDate')?.value;
+      const toDate = document.getElementById('execReportToDate')?.value;
+      const targetBranch = document.getElementById('execReportBranchSelect')?.value || 'all';
+      const scope = document.getElementById('execReportScopeSelect')?.value || 'all';
+
+      if (!fromDate || !toDate) {
+        showToast('⚠️ يرجى تحديد تاريخ البداية وتاريخ النهاية');
+        return;
+      }
+
+      if (fromDate > toDate) {
+        showToast('⚠️ تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية');
+        return;
+      }
+
+      const summaryCardsEl = document.getElementById('execReportSummaryCards');
+      const contentEl = document.getElementById('execReportContent');
+      const generateBtn = document.getElementById('btnGenerateExecReport');
+
+      if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.innerText = '⏳ جاري التحليل...';
+      }
+
+      if (summaryCardsEl) {
+        summaryCardsEl.innerHTML = '';
+      }
+      if (contentEl) {
+        contentEl.innerHTML = `
+          <div style="text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px;">
+            <div class="pulse-dot" style="display: inline-block; width: 14px; height: 14px; margin-bottom: 8px;"></div>
+            <div style="font-weight: 700;">جاري استخراج بيانات العمليات وتحليل نسب الإنجاز...</div>
+            <div style="font-size: 12px; margin-top: 4px;">يتم الفحص عبر السحابة والتخزين المحلي</div>
+          </div>
+        `;
+      }
+
+      try {
+        // 1. Generate array of dates
+        const dateList = [];
+        let cur = new Date(fromDate);
+        const end = new Date(toDate);
+        while (cur <= end) {
+          dateList.push(cur.toISOString().split('T')[0]);
+          cur.setDate(cur.getDate() + 1);
+        }
+
+        // 2. Identify target branches
+        const allBranches = getBranchesList();
+        let targetBranches = (targetBranch === 'all') 
+          ? allBranches 
+          : allBranches.filter(b => b.id === targetBranch);
+
+        if (targetBranches.length === 0) {
+          targetBranches = [getBranchById(targetBranch)];
+        }
+
+        // 3. Query data per branch across date range
+        const branchesReport = [];
+
+        for (const b of targetBranches) {
+          let cloudDays = {};
+          if (firebaseDb) {
+            try {
+              const snap = await firebaseDb.ref('branches/' + b.id + '/daily_ops')
+                .orderByKey()
+                .startAt(fromDate)
+                .endAt(toDate)
+                .once('value');
+              if (snap.exists()) {
+                snap.forEach(child => {
+                  cloudDays[child.key] = deserializeStateFromFirebase(child.val());
+                });
+              }
+            } catch (fbErr) {
+              console.warn('Firebase query failed for branch ' + b.id + ':', fbErr);
+            }
+          }
+
+          const branchDailyBreakdown = [];
+          let branchTotalRequired = 0;
+          let branchTotalDone = 0;
+          let branchTotalCritical = 0;
+          let branchTotalInProgress = 0;
+          let branchActiveDaysCount = 0;
+          let branchFloorDoneTotal = 0;
+          let branchFloorRequiredTotal = 0;
+          let branchWhDoneTotal = 0;
+          let branchWhRequiredTotal = 0;
+
+          for (const d of dateList) {
+            let dayItems = null;
+
+            // Check in-memory state if current branch & current date
+            if (b.id === currentBranchId && d === currentDate && state && state.items && Object.keys(state.items).length > 0) {
+              dayItems = state.items;
+            }
+
+            // Check cloud snapshot
+            if (!dayItems && cloudDays[d] && cloudDays[d].items) {
+              dayItems = cloudDays[d].items;
+            }
+
+            // Check local storage fallback
+            if (!dayItems) {
+              const opsKey = 'diwan_day_ops_' + b.id + '_' + d;
+              const legacyKey = STORAGE_KEYS.SHIFT_PREFIX + b.id + '_' + d + '_morning';
+              const raw = safeGetItem(opsKey) || safeGetItem(legacyKey);
+              if (raw) {
+                const parsed = safeJsonParse(raw);
+                if (parsed && parsed.items) dayItems = parsed.items;
+              }
+            }
+
+            const hasData = !!(dayItems && Object.keys(dayItems).length > 0);
+            let dayStats = null;
+            let dayFloorStats = null;
+            let dayWhStats = null;
+
+            if (hasData) {
+              branchActiveDaysCount++;
+              const overall = calculateBranchOverallStats(dayItems, b.id);
+              dayFloorStats = {
+                done: overall.floorDoneDuties,
+                total: overall.floorTotalDuties,
+                pct: overall.floorTotalDuties > 0 ? Math.round((overall.floorDoneDuties / overall.floorTotalDuties) * 100) : 0
+              };
+              dayWhStats = {
+                done: overall.whDone,
+                total: overall.whTotal,
+                pct: overall.whTotal > 0 ? Math.round((overall.whDone / overall.whTotal) * 100) : 0
+              };
+
+              if (scope === 'floor') {
+                dayStats = {
+                  done: overall.floorDoneDuties,
+                  total: overall.floorTotalDuties,
+                  critical: overall.critical,
+                  inProgress: overall.inProgress,
+                  percentage: dayFloorStats.pct
+                };
+              } else if (scope === 'warehouse') {
+                const wh = calculateShiftStats('warehouse_daily', dayItems, b.id);
+                dayStats = {
+                  done: wh.done,
+                  total: wh.total,
+                  critical: wh.critical,
+                  inProgress: wh.inProgress,
+                  percentage: wh.percentage
+                };
+              } else {
+                dayStats = {
+                  done: overall.done,
+                  total: overall.total,
+                  critical: overall.critical,
+                  inProgress: overall.inProgress,
+                  percentage: overall.percentage
+                };
+              }
+
+              branchTotalRequired += dayStats.total;
+              branchTotalDone += dayStats.done;
+              branchTotalCritical += dayStats.critical;
+              branchTotalInProgress += dayStats.inProgress;
+              branchFloorDoneTotal += dayFloorStats.done;
+              branchFloorRequiredTotal += dayFloorStats.total;
+              branchWhDoneTotal += dayWhStats.done;
+              branchWhRequiredTotal += dayWhStats.total;
+            } else {
+              const branchShifts = getBranchShifts(b.id);
+              const fReq = getBranchFloorTotalItems(b.id) * branchShifts.length;
+              const wReq = getBranchWarehouseTotalItems(b.id);
+              let defTotal = fReq + wReq;
+              if (scope === 'floor') defTotal = fReq;
+              if (scope === 'warehouse') defTotal = wReq;
+
+              dayStats = {
+                done: 0,
+                total: defTotal,
+                critical: 0,
+                inProgress: 0,
+                percentage: 0
+              };
+              dayFloorStats = { done: 0, total: fReq, pct: 0 };
+              dayWhStats = { done: 0, total: wReq, pct: 0 };
+            }
+
+            branchDailyBreakdown.push({
+              date: d,
+              hasData,
+              stats: dayStats,
+              floorStats: dayFloorStats,
+              whStats: dayWhStats
+            });
+          }
+
+          const branchAggPct = branchTotalRequired > 0 
+            ? Math.round((branchTotalDone / branchTotalRequired) * 100) 
+            : 0;
+
+          const branchFloorAggPct = branchFloorRequiredTotal > 0
+            ? Math.round((branchFloorDoneTotal / branchFloorRequiredTotal) * 100)
+            : 0;
+
+          const branchWhAggPct = branchWhRequiredTotal > 0
+            ? Math.round((branchWhDoneTotal / branchWhRequiredTotal) * 100)
+            : 0;
+
+          branchesReport.push({
+            branch: b,
+            activeDaysCount,
+            totalDays: dateList.length,
+            totalRequired: branchTotalRequired,
+            totalDone: branchTotalDone,
+            totalCritical: branchTotalCritical,
+            totalInProgress: branchTotalInProgress,
+            aggregatePercentage: branchAggPct,
+            floorPercentage: branchFloorAggPct,
+            warehousePercentage: branchWhAggPct,
+            dailyBreakdown: branchDailyBreakdown
+          });
+        }
+
+        // Sort branches by aggregate percentage descending
+        branchesReport.sort((a, b) => b.aggregatePercentage - a.aggregatePercentage);
+
+        // Network overall totals
+        let netRequired = 0;
+        let netDone = 0;
+        let netCritical = 0;
+        let netActiveDays = 0;
+
+        branchesReport.forEach(br => {
+          netRequired += br.totalRequired;
+          netDone += br.totalDone;
+          netCritical += br.totalCritical;
+          netActiveDays += br.activeDaysCount;
+        });
+
+        const netAggPct = netRequired > 0 ? Math.round((netDone / netRequired) * 100) : 0;
+        const topBranch = branchesReport.length > 0 ? branchesReport[0] : null;
+
+        lastGeneratedExecutiveReportData = {
+          fromDate,
+          toDate,
+          targetBranch,
+          scope,
+          dateList,
+          branchesReport,
+          netAggPct,
+          netDone,
+          netRequired,
+          netCritical,
+          netActiveDays,
+          topBranch,
+          generatedAt: new Date().toISOString(),
+          generatedBy: currentSupervisor || 'الإدارة العليا'
+        };
+
+        renderExecutiveDateReportUI(lastGeneratedExecutiveReportData);
+
+      } catch (err) {
+        console.error('Error generating executive report:', err);
+        showToast('❌ حدث خطأ أثناء استخراج التقرير: ' + (err.message || err));
+        if (contentEl) {
+          contentEl.innerHTML = `
+            <div style="background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 16px; border-radius: 8px; text-align: center; font-size: 13px;">
+              ❌ تعذر إتمام استخراج التقرير. يرجى المحاولة مرة أخرى أو التأكد من الاتصال.
+            </div>
+          `;
+        }
+      } finally {
+        if (generateBtn) {
+          generateBtn.disabled = false;
+          generateBtn.innerText = '⚡ استخراج';
+        }
+      }
+    }
+
+    function renderExecutiveDateReportUI(data) {
+      const summaryCardsEl = document.getElementById('execReportSummaryCards');
+      const contentEl = document.getElementById('execReportContent');
+      const footerMetaEl = document.getElementById('execReportFooterMeta');
+
+      if (footerMetaEl) {
+        footerMetaEl.innerText = `تقرير تم استخراجه بتاريخ ${new Date(data.generatedAt).toLocaleString('ar-LB')} بواسطة: ${data.generatedBy}`;
+      }
+
+      // 1. KPI Summary Cards
+      const pctColor = data.netAggPct >= 85 ? '#059669' : (data.netAggPct >= 70 ? '#d97706' : '#dc2626');
+      const pctBg = data.netAggPct >= 85 ? '#ecfdf5' : (data.netAggPct >= 70 ? '#fffbeb' : '#fef2f2');
+      const pctBorder = data.netAggPct >= 85 ? '#a7f3d0' : (data.netAggPct >= 70 ? '#fde68a' : '#fecaca');
+      const pctRating = data.netAggPct >= 85 ? 'أداء ممتاز ⭐' : (data.netAggPct >= 70 ? 'أداء جيد جداً 👍' : 'يحتاج إلى تحسين ومتابعة ⚠️');
+
+      const topBranchText = data.topBranch 
+        ? `${escapeHtml(data.topBranch.branch.nameAr)} (${data.topBranch.aggregatePercentage}%)`
+        : '—';
+
+      if (summaryCardsEl) {
+        summaryCardsEl.innerHTML = `
+          <div class="exec-kpi-card" style="background: ${pctBg}; border: 1.5px solid ${pctBorder}; border-radius: 10px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; font-weight: 700; color: ${pctColor};">متوسط نسبة الإنجاز</div>
+            <div style="font-size: 24px; font-weight: 900; color: ${pctColor}; margin: 2px 0;">${data.netAggPct}%</div>
+            <div style="font-size: 10.5px; color: ${pctColor}; font-weight: 700;">${pctRating}</div>
+          </div>
+
+          <div class="exec-kpi-card" style="background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; font-weight: 700; color: #1e40af;">الفرع الأكثر تميزاً</div>
+            <div style="font-size: 15px; font-weight: 900; color: #1d4ed8; margin: 6px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${topBranchText}">${topBranchText}</div>
+            <div style="font-size: 10.5px; color: #2563eb;">أعلى نسبة إنجاز للفترة</div>
+          </div>
+
+          <div class="exec-kpi-card" style="background: #eef2ff; border: 1.5px solid #c7d2fe; border-radius: 10px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; font-weight: 700; color: #3730a3;">إجمالي المهام المنجزة</div>
+            <div style="font-size: 20px; font-weight: 900; color: #4338ca; margin: 4px 0;">${data.netDone.toLocaleString()} <span style="font-size: 12px; font-weight: 600; color: #6366f1;">/ ${data.netRequired.toLocaleString()}</span></div>
+            <div style="font-size: 10.5px; color: #4f46e5;">مهمة تشغيلية مطلوبة</div>
+          </div>
+
+          <div class="exec-kpi-card" style="background: ${data.netCritical > 0 ? '#fef2f2' : '#f8fafc'}; border: 1.5px solid ${data.netCritical > 0 ? '#fecaca' : '#e2e8f0'}; border-radius: 10px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; font-weight: 700; color: ${data.netCritical > 0 ? '#991b1b' : '#64748b'};">الأعطال الحرجة المرصودة</div>
+            <div style="font-size: 24px; font-weight: 900; color: ${data.netCritical > 0 ? '#dc2626' : '#64748b'}; margin: 2px 0;">${data.netCritical}</div>
+            <div style="font-size: 10.5px; color: ${data.netCritical > 0 ? '#b91c1c' : '#94a3b8'}; font-weight: 700;">${data.netCritical > 0 ? '⚠️ تستوجب المتابعة الفورية' : '✅ لا توجد أعطال حرجة'}</div>
+          </div>
+
+          <div class="exec-kpi-card" style="background: #faf5ff; border: 1.5px solid #e9d5ff; border-radius: 10px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; font-weight: 700; color: #6b21a8;">الفترة الزمنية والأيام</div>
+            <div style="font-size: 18px; font-weight: 900; color: #7e22ce; margin: 4px 0;">${data.dateList.length} <span style="font-size: 12px;">أيام</span></div>
+            <div style="font-size: 10.5px; color: #9333ea;">من ${data.fromDate} إلى ${data.toDate}</div>
+          </div>
+        `;
+      }
+
+      // 2. Report Content
+      if (contentEl) {
+        let branchRows = '';
+        data.branchesReport.forEach((br, idx) => {
+          const bPct = br.aggregatePercentage;
+          const barColor = bPct >= 85 ? '#10b981' : (bPct >= 70 ? '#f59e0b' : '#ef4444');
+          const rankBadge = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : `${idx + 1}`));
+          const ratingBadge = bPct >= 85 
+            ? '<span style="background: #ecfdf5; color: #065f46; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; border: 1px solid #10b981;">ممتاز ⭐</span>'
+            : (bPct >= 70 
+                ? '<span style="background: #fffbeb; color: #92400e; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; border: 1px solid #f59e0b;">جيد جداً 👍</span>'
+                : '<span style="background: #fef2f2; color: #991b1b; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; border: 1px solid #ef4444;">يحتاج متابعة ⚠️</span>');
+
+          branchRows += `
+            <tr style="border-bottom: 1px solid var(--border); transition: background 0.15s ease;">
+              <td style="padding: 10px 8px; text-align: center; font-size: 14px; font-weight: 800;">${rankBadge}</td>
+              <td style="padding: 10px 8px;">
+                <div style="font-weight: 800; color: var(--secondary); font-size: 13.5px;">${escapeHtml(br.branch.nameAr)}</div>
+                <div style="font-size: 11px; color: var(--text-muted);">📍 ${escapeHtml(br.branch.location)}</div>
+              </td>
+              <td style="padding: 10px 8px; text-align: center;">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-weight: 900; font-size: 14px; color: ${barColor}; min-width: 42px;">${bPct}%</span>
+                  <div style="flex: 1; max-width: 90px; height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden;">
+                    <div style="height: 100%; width: ${bPct}%; background: ${barColor}; border-radius: 999px;"></div>
+                  </div>
+                </div>
+              </td>
+              <td style="padding: 10px 8px; text-align: center; font-weight: 700; font-size: 12.5px;">${br.floorPercentage}%</td>
+              <td style="padding: 10px 8px; text-align: center; font-weight: 700; font-size: 12.5px;">${br.warehousePercentage}%</td>
+              <td style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-muted);">
+                <strong style="color: var(--text);">${br.totalDone}</strong> / ${br.totalRequired}
+              </td>
+              <td style="padding: 10px 8px; text-align: center;">
+                ${br.totalCritical > 0 
+                  ? `<span style="background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; padding: 2px 7px; border-radius: 999px; font-weight: 800; font-size: 11.5px;">🚨 ${br.totalCritical}</span>`
+                  : `<span style="color: #64748b; font-size: 12px;">0</span>`}
+              </td>
+              <td style="padding: 10px 8px; text-align: center; font-size: 12px;">
+                ${br.activeDaysCount} <span style="font-size: 10.5px; color: var(--text-muted);">/ ${br.totalDays} يوماً</span>
+              </td>
+              <td style="padding: 10px 8px; text-align: center;">${ratingBadge}</td>
+            </tr>
+          `;
+        });
+
+        // Daily trend rows
+        let dailyRows = '';
+        data.dateList.forEach(d => {
+          data.branchesReport.forEach(br => {
+            const dayData = br.dailyBreakdown.find(item => item.date === d);
+            if (!dayData) return;
+            const dateObj = new Date(d);
+            const arabicDays = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+            const dayName = arabicDays[dateObj.getDay()] || '';
+            const dPct = dayData.stats.percentage;
+            const dColor = dPct >= 85 ? '#10b981' : (dPct >= 70 ? '#f59e0b' : '#ef4444');
+
+            dailyRows += `
+              <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 8px 10px; font-weight: 700; font-size: 12px;">
+                  <span>${d}</span>
+                  <span style="font-size: 11px; color: var(--text-muted); margin-inline-start: 4px;">(${dayName})</span>
+                </td>
+                <td style="padding: 8px 10px; font-weight: 700; font-size: 12px; color: var(--secondary);">${escapeHtml(br.branch.nameAr)}</td>
+                <td style="padding: 8px 10px; text-align: center;">
+                  ${dayData.hasData 
+                    ? `<span style="font-weight: 800; font-size: 12.5px; color: ${dColor};">${dPct}%</span>`
+                    : `<span style="color: #94a3b8; font-size: 11px; font-style: italic;">لم تسجل عمليات</span>`}
+                </td>
+                <td style="padding: 8px 10px; text-align: center; font-size: 12px;">${dayData.hasData ? dayData.floorStats.pct + '%' : '—'}</td>
+                <td style="padding: 8px 10px; text-align: center; font-size: 12px;">${dayData.hasData ? dayData.whStats.pct + '%' : '—'}</td>
+                <td style="padding: 8px 10px; text-align: center; font-size: 12px; color: var(--text-muted);">
+                  ${dayData.hasData ? `<strong style="color: var(--text);">${dayData.stats.done}</strong> / ${dayData.stats.total}` : '—'}
+                </td>
+                <td style="padding: 8px 10px; text-align: center;">
+                  ${dayData.stats.critical > 0 
+                    ? `<span style="background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; padding: 1px 6px; border-radius: 999px; font-weight: 800; font-size: 11px;">🚨 ${dayData.stats.critical}</span>`
+                    : (dayData.hasData ? `<span style="color: #64748b; font-size: 11.5px;">0</span>` : '—')}
+                </td>
+              </tr>
+            `;
+          });
+        });
+
+        contentEl.innerHTML = `
+          <!-- COMPARATIVE BRANCHES SECTION -->
+          <div style="background: var(--card-bg, #ffffff); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 20px; box-shadow: var(--shadow-sm);">
+            <div style="padding: 12px 16px; background: rgba(124, 58, 237, 0.05); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 18px;">🏢</span>
+                <h4 style="margin: 0; font-size: 14px; font-weight: 800; color: var(--secondary);">جدول المقارنة وترتيب الفروع حسب الإنجاز</h4>
+              </div>
+              <span style="font-size: 11.5px; color: var(--text-muted);">مرتبة تنازلياً حسب أعلى نسبة إنجاز</span>
+            </div>
+            <div style="overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; min-width: 650px;">
+                <thead>
+                  <tr style="background: var(--table-header-bg, #f8fafc); border-bottom: 2px solid var(--border); font-size: 12px; color: var(--text-muted);">
+                    <th style="padding: 8px; text-align: center; width: 44px;">#</th>
+                    <th style="padding: 8px; text-align: right;">الفرع والموقع</th>
+                    <th style="padding: 8px; text-align: center;">نسبة الإنجاز %</th>
+                    <th style="padding: 8px; text-align: center;">الصالة</th>
+                    <th style="padding: 8px; text-align: center;">المستودع</th>
+                    <th style="padding: 8px; text-align: center;">المهام (منجز / مطلوب)</th>
+                    <th style="padding: 8px; text-align: center;">الأعطال</th>
+                    <th style="padding: 8px; text-align: center;">الأيام النشطة</th>
+                    <th style="padding: 8px; text-align: center;">التقييم</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${branchRows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- DAILY HISTORICAL BREAKDOWN -->
+          <div style="background: var(--card-bg, #ffffff); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm);">
+            <div style="padding: 12px 16px; background: rgba(59, 130, 246, 0.05); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 18px;">📅</span>
+                <h4 style="margin: 0; font-size: 14px; font-weight: 800; color: var(--secondary);">سجل التتبع الزمني اليومي لكافة الفروع للفترة</h4>
+              </div>
+              <span style="font-size: 11.5px; color: var(--text-muted);">${data.dateList.length} يوم مفحوص</span>
+            </div>
+            <div style="overflow-x: auto; max-height: 420px; overflow-y: auto;">
+              <table style="width: 100%; border-collapse: collapse; min-width: 650px;">
+                <thead style="position: sticky; top: 0; z-index: 2;">
+                  <tr style="background: var(--table-header-bg, #f8fafc); border-bottom: 2px solid var(--border); font-size: 11.5px; color: var(--text-muted);">
+                    <th style="padding: 8px 10px; text-align: right;">التاريخ واليوم</th>
+                    <th style="padding: 8px 10px; text-align: right;">الفرع</th>
+                    <th style="padding: 8px 10px; text-align: center;">نسبة الإنجاز</th>
+                    <th style="padding: 8px 10px; text-align: center;">الصالة</th>
+                    <th style="padding: 8px 10px; text-align: center;">المستودع</th>
+                    <th style="padding: 8px 10px; text-align: center;">المهام</th>
+                    <th style="padding: 8px 10px; text-align: center;">الأعطال</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${dailyRows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    function printExecutiveDateReport() {
+      if (!lastGeneratedExecutiveReportData) {
+        showToast('⚠️ يرجى استخراج التقرير أولاً قبل الطباعة');
+        return;
+      }
+      const data = lastGeneratedExecutiveReportData;
+      const printArea = document.getElementById('executiveReportPrintArea');
+      if (!printArea) return;
+
+      const scopeTitle = data.scope === 'floor' 
+        ? 'صالة العرض فقط' 
+        : (data.scope === 'warehouse' ? 'المستودع فقط' : 'شامل (الصالة والمستودع)');
+
+      const branchTitle = data.targetBranch === 'all'
+        ? 'جميع الفروع (شبكة ديوان ماركت)'
+        : getBranchById(data.targetBranch).nameAr;
+
+      const nowFormatted = new Date().toLocaleString('ar-LB', { 
+        year: 'numeric', month: 'numeric', day: 'numeric', 
+        hour: '2-digit', minute: '2-digit' 
+      });
+
+      let branchesRowsHtml = '';
+      data.branchesReport.forEach((br, idx) => {
+        const statusText = br.aggregatePercentage >= 85 ? 'ممتاز ⭐' : (br.aggregatePercentage >= 70 ? 'جيد جداً' : 'يحتاج متابعة ⚠️');
+        branchesRowsHtml += `
+          <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11.5px;">
+            <td style="padding: 6px 8px; text-align: center; font-weight: 800;">${idx + 1}</td>
+            <td style="padding: 6px 8px; font-weight: 700;">${escapeHtml(br.branch.nameAr)} <span style="font-size: 10px; color: #64748b;">(${escapeHtml(br.branch.location)})</span></td>
+            <td style="padding: 6px 8px; text-align: center; font-weight: 800; color: ${br.aggregatePercentage >= 80 ? '#059669' : '#b45309'}; font-size: 13px;">${br.aggregatePercentage}%</td>
+            <td style="padding: 6px 8px; text-align: center;">${br.floorPercentage}%</td>
+            <td style="padding: 6px 8px; text-align: center;">${br.warehousePercentage}%</td>
+            <td style="padding: 6px 8px; text-align: center;">${br.totalDone} / ${br.totalRequired}</td>
+            <td style="padding: 6px 8px; text-align: center; color: ${br.totalCritical > 0 ? '#dc2626' : '#64748b'}; font-weight: 700;">${br.totalCritical}</td>
+            <td style="padding: 6px 8px; text-align: center;">${br.activeDaysCount} / ${br.totalDays}</td>
+            <td style="padding: 6px 8px; text-align: center; font-weight: 700;">${statusText}</td>
+          </tr>
+        `;
+      });
+
+      let dailyRowsHtml = '';
+      data.dateList.forEach(d => {
+        data.branchesReport.forEach(br => {
+          const dayData = br.dailyBreakdown.find(item => item.date === d);
+          if (!dayData) return;
+          const dayName = new Date(d).toLocaleDateString('ar-LB', { weekday: 'short' });
+          dailyRowsHtml += `
+            <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11px;">
+              <td style="padding: 5px 8px; text-align: center; font-weight: 700;">${d} (${dayName})</td>
+              <td style="padding: 5px 8px; font-weight: 700;">${escapeHtml(br.branch.nameAr)}</td>
+              <td style="padding: 5px 8px; text-align: center; font-weight: 800; color: ${dayData.stats.percentage >= 80 ? '#059669' : '#b45309'};">${dayData.hasData ? dayData.stats.percentage + '%' : '<span style="color:#94a3b8;">غير مسجل</span>'}</td>
+              <td style="padding: 5px 8px; text-align: center;">${dayData.floorStats.pct}%</td>
+              <td style="padding: 5px 8px; text-align: center;">${dayData.whStats.pct}%</td>
+              <td style="padding: 5px 8px; text-align: center;">${dayData.stats.done} / ${dayData.stats.total}</td>
+              <td style="padding: 5px 8px; text-align: center; color: ${dayData.stats.critical > 0 ? '#dc2626' : '#64748b'}; font-weight: 700;">${dayData.stats.critical}</td>
+            </tr>
+          `;
+        });
+      });
+
+      printArea.innerHTML = `
+        <div style="font-family: 'Cairo', Arial, sans-serif; direction: rtl; color: #000; padding: 20px;">
+          <!-- OFFICIAL HEADER -->
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2.5px solid #1e293b; padding-bottom: 14px; margin-bottom: 16px;">
+            <div style="text-align: right;">
+              <h1 style="margin: 0 0 4px 0; font-size: 22px; font-weight: 900; color: #0f172a;">ديوان ماركت – تقرير الإنجاز ومؤشرات الأداء الإداري</h1>
+              <h2 style="margin: 0; font-size: 14px; font-weight: 700; color: #475569;">تقرير سري مخصص لمجلس الإدارة والإدارة العامة</h2>
+            </div>
+            <div style="text-align: left;">
+              <img src="diwan.PNG" alt="شعار ديوان ماركت" style="height: 52px; border-radius: 4px; display: block;">
+            </div>
+          </div>
+
+          <!-- METADATA BAR -->
+          <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+            <div><strong>الفترة المحددة:</strong> من ${data.fromDate} إلى ${data.toDate} (${data.dateList.length} أيام)</div>
+            <div><strong>الفرع / النطاق:</strong> ${escapeHtml(branchTitle)} | ${escapeHtml(scopeTitle)}</div>
+            <div><strong>تاريخ الاستخراج:</strong> ${nowFormatted}</div>
+            <div><strong>المسؤول المستخرج:</strong> ${escapeHtml(data.generatedBy)}</div>
+          </div>
+
+          <!-- KPI SUMMARY GRID -->
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px;">
+            <div style="border: 1.5px solid #059669; border-radius: 6px; padding: 8px 12px; text-align: center; background: #f0fdf4;">
+              <div style="font-size: 11.5px; color: #166534; font-weight: 700;">متوسط نسبة الإنجاز العام</div>
+              <div style="font-size: 22px; font-weight: 900; color: #059669; margin: 4px 0;">${data.netAggPct}%</div>
+              <div style="font-size: 10.5px; color: #15803d;">كافة المهام المطلوبة</div>
+            </div>
+            <div style="border: 1.5px solid #3b82f6; border-radius: 6px; padding: 8px 12px; text-align: center; background: #eff6ff;">
+              <div style="font-size: 11.5px; color: #1e40af; font-weight: 700;">الفرع الأكثر تميزاً</div>
+              <div style="font-size: 16px; font-weight: 900; color: #1d4ed8; margin: 7px 0;">${data.topBranch ? escapeHtml(data.topBranch.branch.nameAr) : '—'}</div>
+              <div style="font-size: 10.5px; color: #2563eb;">نسبة: ${data.topBranch ? data.topBranch.aggregatePercentage + '%' : '—'}</div>
+            </div>
+            <div style="border: 1.5px solid #6366f1; border-radius: 6px; padding: 8px 12px; text-align: center; background: #eef2ff;">
+              <div style="font-size: 11.5px; color: #3730a3; font-weight: 700;">إجمالي المهام المنجزة</div>
+              <div style="font-size: 20px; font-weight: 900; color: #4338ca; margin: 4px 0;">${data.netDone} / ${data.netRequired}</div>
+              <div style="font-size: 10.5px; color: #4f46e5;">مهمة ميدانية مكتملة</div>
+            </div>
+            <div style="border: 1.5px solid #ef4444; border-radius: 6px; padding: 8px 12px; text-align: center; background: #fef2f2;">
+              <div style="font-size: 11.5px; color: #991b1b; font-weight: 700;">الأعطال الحرجة المسجلة</div>
+              <div style="font-size: 22px; font-weight: 900; color: #dc2626; margin: 4px 0;">${data.netCritical}</div>
+              <div style="font-size: 10.5px; color: #b91c1c;">أعطال تستدعي المتابعة</div>
+            </div>
+          </div>
+
+          <!-- COMPARATIVE MATRIX TABLE -->
+          <h3 style="font-size: 13.5px; font-weight: 800; margin: 0 0 8px 0; color: #1e293b; border-bottom: 1.5px solid #cbd5e1; padding-bottom: 4px;">
+            📊 جدول مقارنة وتقييم إنجاز الفروع للفترة
+          </h3>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <thead>
+              <tr style="background: #f1f5f9; border-bottom: 2px solid #94a3b8; font-size: 11.5px;">
+                <th style="padding: 6px 8px; text-align: center;">#</th>
+                <th style="padding: 6px 8px; text-align: right;">الفرع والموقع</th>
+                <th style="padding: 6px 8px; text-align: center;">نسبة الإنجاز %</th>
+                <th style="padding: 6px 8px; text-align: center;">نسبة الصالة</th>
+                <th style="padding: 6px 8px; text-align: center;">نسبة المستودع</th>
+                <th style="padding: 6px 8px; text-align: center;">المهام (منجز / مطلوب)</th>
+                <th style="padding: 6px 8px; text-align: center;">الأعطال</th>
+                <th style="padding: 6px 8px; text-align: center;">أيام التشغيل</th>
+                <th style="padding: 6px 8px; text-align: center;">التقييم العام</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${branchesRowsHtml}
+            </tbody>
+          </table>
+
+          <!-- DAILY LOG BREAKDOWN TABLE -->
+          <h3 style="font-size: 13.5px; font-weight: 800; margin: 0 0 8px 0; color: #1e293b; border-bottom: 1.5px solid #cbd5e1; padding-bottom: 4px; page-break-before: auto;">
+            📅 التتبع الزمني اليومي المفصل
+          </h3>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 26px;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1; font-size: 11px;">
+                <th style="padding: 5px 8px; text-align: center;">التاريخ واليوم</th>
+                <th style="padding: 5px 8px; text-align: right;">الفرع</th>
+                <th style="padding: 5px 8px; text-align: center;">نسبة الإنجاز %</th>
+                <th style="padding: 5px 8px; text-align: center;">الصالة</th>
+                <th style="padding: 5px 8px; text-align: center;">المستودع</th>
+                <th style="padding: 5px 8px; text-align: center;">المهام (منجز/مطلوب)</th>
+                <th style="padding: 5px 8px; text-align: center;">الأعطال</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${dailyRowsHtml}
+            </tbody>
+          </table>
+
+          <!-- OFFICIAL SIGNATURE BLOCK -->
+          <div style="border-top: 2px solid #1e293b; padding-top: 14px; margin-top: 20px; page-break-inside: avoid;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; text-align: center;">
+              <div>
+                <div style="font-size: 12.5px; font-weight: 800; color: #0f172a; margin-bottom: 40px;">إعداد وتوقيع المدير العام:</div>
+                <div style="font-size: 12px; font-weight: 700; color: #334155;">الأستاذ علي عبد العال</div>
+                <div style="font-size: 10.5px; color: #64748b;">التوقيع: .......................................</div>
+              </div>
+              <div>
+                <div style="font-size: 12.5px; font-weight: 800; color: #0f172a; margin-bottom: 40px;">خاتم الإدارة المركزية:</div>
+                <div style="width: 70px; height: 70px; border: 2px dashed #94a3b8; border-radius: 50%; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #94a3b8;">
+                  خاتم رسمي
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 12.5px; font-weight: 800; color: #0f172a; margin-bottom: 40px;">اعتماد رئيس مجلس الإدارة:</div>
+                <div style="font-size: 12px; font-weight: 700; color: #334155;">الحاج غسان أيوب</div>
+                <div style="font-size: 10.5px; color: #64748b;">التوقيع: .......................................</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.body.classList.add('printing-executive-report');
+      window.print();
+      setTimeout(() => {
+        document.body.classList.remove('printing-executive-report');
+      }, 1000);
     }
 
     // Close modal when clicking backdrop (H7)
