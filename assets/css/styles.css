@@ -3952,6 +3952,35 @@
   }
 }
 
+/* ============================================================
+   CANCEL / PURGE BRANCH OPERATIONS MODAL STYLES
+   ============================================================ */
+.cancel-ops-modal-card {
+  box-shadow: 0 25px 50px -12px rgba(185, 28, 28, 0.3);
+  border: 1.5px solid rgba(220, 38, 38, 0.3);
+}
+
+[data-theme="dark"] .cancel-ops-modal-card .modal-body {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .cancel-ops-modal-card .modal-footer {
+  background: #1e1b4b !important;
+  border-top-color: #334155 !important;
+}
+
+[data-theme="dark"] #cancelOpsBranchCheckboxes {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+}
+
+[data-theme="dark"] #cancelOpsBranchCheckboxes label {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+}
+
+
 
 
 

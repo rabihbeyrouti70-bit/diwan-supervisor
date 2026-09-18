@@ -830,6 +830,16 @@
       }
     }
 
+    function safeRemoveItem(key) {
+      try {
+        localStorage.removeItem(key);
+        return true;
+      } catch (e) {
+        console.warn('localStorage removeItem failed for key:', key, e);
+        return false;
+      }
+    }
+
     function safeJsonParse(jsonStr, defaultValue = null) {
       if (!jsonStr) return defaultValue;
       try {
@@ -8619,6 +8629,304 @@
       setTimeout(() => {
         document.body.classList.remove('printing-executive-report');
       }, 1000);
+    }
+
+    /* ============================================================
+       CANCEL / PURGE BRANCH OPERATIONS ENGINE (GM & CHAIRMAN ONLY)
+       ============================================================ */
+    function openCancelOperationsModal(initialBranchId, initialFromDate, initialToDate) {
+      if (!isExecutiveUser()) {
+        showToast('⛔ عذراً، هذا الإجراء مخصص حصراً للمدير العام ورئيس مجلس الإدارة');
+        return;
+      }
+
+      document.body.classList.add('modal-open');
+      const modal = document.getElementById('cancelOperationsModal');
+      if (!modal) return;
+      modal.classList.add('open');
+
+      const fromInput = document.getElementById('cancelOpsFromDate');
+      const toInput = document.getElementById('cancelOpsToDate');
+      const today = currentDate || new Date().toISOString().split('T')[0];
+
+      if (fromInput) {
+        if (initialFromDate) {
+          fromInput.value = initialFromDate;
+        } else if (!fromInput.value) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - 6);
+          fromInput.value = d.toISOString().split('T')[0];
+        }
+      }
+
+      if (toInput) {
+        if (initialToDate) {
+          toInput.value = initialToDate;
+        } else if (!toInput.value) {
+          toInput.value = today;
+        }
+      }
+
+      // Populate branches
+      let preselect = initialBranchId;
+      if (!preselect) {
+        const repSelect = document.getElementById('execReportBranchSelect');
+        if (repSelect) preselect = repSelect.value;
+      }
+      populateCancelOpsBranches(preselect || 'all');
+    }
+
+    function openCancelOpsFromReport() {
+      const repBranch = document.getElementById('execReportBranchSelect')?.value || 'all';
+      const repFrom = document.getElementById('execReportFromDate')?.value;
+      const repTo = document.getElementById('execReportToDate')?.value;
+      openCancelOperationsModal(repBranch, repFrom, repTo);
+    }
+
+    function closeCancelOperationsModal() {
+      const modal = document.getElementById('cancelOperationsModal');
+      if (modal) modal.classList.remove('open');
+      document.body.classList.remove('modal-open');
+    }
+
+    function populateCancelOpsBranches(preselected) {
+      const container = document.getElementById('cancelOpsBranchCheckboxes');
+      if (!container) return;
+      const branches = getBranchesList();
+
+      const isSelectAll = (preselected === 'all' || !preselected);
+      let selectedSet = new Set();
+      if (Array.isArray(preselected)) {
+        selectedSet = new Set(preselected);
+      } else if (typeof preselected === 'string' && preselected !== 'all') {
+        selectedSet = new Set([preselected]);
+      }
+
+      let html = '';
+      branches.forEach(b => {
+        const isChecked = isSelectAll || selectedSet.has(b.id);
+        html += `
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; cursor: pointer; padding: 6px 10px; border-radius: 6px; background: var(--input-bg, #ffffff); border: 1px solid var(--border); transition: all 0.15s ease;">
+            <input type="checkbox" class="cancel-branch-check" value="${escapeHtml(b.id)}" ${isChecked ? 'checked' : ''} style="width: 16px; height: 16px; accent-color: #dc2626; cursor: pointer;">
+            <span style="color: var(--secondary);">🏢 ${escapeHtml(b.nameAr)}</span>
+            <span style="font-size: 10.5px; color: var(--text-muted); margin-inline-start: auto;">(${escapeHtml(b.location)})</span>
+          </label>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    function toggleAllCancelOpsBranches(selectAll) {
+      const checkboxes = document.querySelectorAll('.cancel-branch-check');
+      checkboxes.forEach(cb => { cb.checked = !!selectAll; });
+    }
+
+    async function executeCancelOperations() {
+      if (!isExecutiveUser()) {
+        showToast('⛔ عذراً، هذا الإجراء مخصص حصراً للمدير العام ورئيس مجلس الإدارة');
+        return;
+      }
+
+      const fromDate = document.getElementById('cancelOpsFromDate')?.value;
+      const toDate = document.getElementById('cancelOpsToDate')?.value;
+      const scope = document.getElementById('cancelOpsScope')?.value || 'all';
+      const checkedBoxes = document.querySelectorAll('.cancel-branch-check:checked');
+      const selectedBranches = Array.from(checkedBoxes).map(el => el.value);
+
+      if (!fromDate || !toDate) {
+        showToast('⚠️ يرجى تحديد تاريخ البداية وتاريخ النهاية');
+        return;
+      }
+
+      if (fromDate > toDate) {
+        showToast('⚠️ تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية');
+        return;
+      }
+
+      if (selectedBranches.length === 0) {
+        showToast('⚠️ يرجى اختيار فرع واحد على الأقل لإلغاء عملياته');
+        return;
+      }
+
+      // Generate date list
+      const dateList = [];
+      let cur = new Date(fromDate);
+      const end = new Date(toDate);
+      while (cur <= end) {
+        dateList.push(cur.toISOString().split('T')[0]);
+        cur.setDate(cur.getDate() + 1);
+      }
+
+      const branchNames = selectedBranches.map(id => getBranchById(id).nameAr).join('، ');
+      const scopeLabel = scope === 'floor' 
+        ? 'مهام صالة العرض فقط' 
+        : (scope === 'warehouse' ? 'مهام المستودع فقط' : 'اليوم كاملاً (صالة ومستودع)');
+
+      const confirmMsg = `⚠️ تأكيد إداري حاسم:\n\nهل أنت متأكد تماماً من إلغاء وتصفير العمليات لـ (${selectedBranches.length}) فروع:\n[ ${branchNames} ]\n\n📅 الفترة: من (${fromDate}) إلى (${toDate}) — بإجمالي (${dateList.length}) أيام\n🎯 النطاق: ${scopeLabel}\n\n⚠️ سيتم مسح السجلات من السحابة وقواعد البيانات نهائياً ولا يمكن التراجع عن هذه العملية!`;
+
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      const confirmBtn = document.getElementById('btnConfirmCancelOps');
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerText = '⏳ جاري الإلغاء والتصفير...';
+      }
+
+      try {
+        let deletedDaysCount = 0;
+
+        for (const bId of selectedBranches) {
+          for (const d of dateList) {
+            // 1. Firebase Realtime Database
+            if (firebaseDb) {
+              if (scope === 'all') {
+                await firebaseDb.ref('branches/' + bId + '/daily_ops/' + d).remove();
+              } else if (scope === 'floor') {
+                const dRef = firebaseDb.ref('branches/' + bId + '/daily_ops/' + d);
+                const snap = await dRef.once('value');
+                const val = snap.val();
+                if (val && val.items) {
+                  const sections = getBranchSections(bId, false);
+                  const floorRawIds = new Set();
+                  sections.forEach(sec => {
+                    const isWh = isWarehouseSection(sec) || sec.targetRole === 'warehouse' || isSectionSingleShift(sec, bId);
+                    if (!isWh && sec.items) {
+                      sec.items.forEach(it => {
+                        floorRawIds.add(it.rawId);
+                        floorRawIds.add(encodeFirebaseKey(it.rawId));
+                      });
+                    }
+                  });
+                  for (const k in val.items) {
+                    if (floorRawIds.has(k) || floorRawIds.has(decodeFirebaseKey(k))) {
+                      delete val.items[k];
+                    }
+                  }
+                  await dRef.set(val);
+                }
+              } else if (scope === 'warehouse') {
+                const dRef = firebaseDb.ref('branches/' + bId + '/daily_ops/' + d);
+                const snap = await dRef.once('value');
+                const val = snap.val();
+                if (val && val.items) {
+                  const sections = getBranchSections(bId, false);
+                  const whRawIds = new Set();
+                  sections.forEach(sec => {
+                    const isWh = isWarehouseSection(sec) || sec.targetRole === 'warehouse' || isSectionSingleShift(sec, bId);
+                    if (isWh && sec.items) {
+                      sec.items.forEach(it => {
+                        whRawIds.add(it.rawId);
+                        whRawIds.add(encodeFirebaseKey(it.rawId));
+                      });
+                    }
+                  });
+                  for (const k in val.items) {
+                    if (whRawIds.has(k) || whRawIds.has(decodeFirebaseKey(k))) {
+                      delete val.items[k];
+                    }
+                  }
+                  await dRef.set(val);
+                }
+              }
+            }
+
+            // 2. LocalStorage cleanup
+            if (scope === 'all') {
+              safeRemoveItem('diwan_day_ops_' + bId + '_' + d);
+              ['morning', 'evening', 'night', 'warehouse'].forEach(sh => {
+                safeRemoveItem(STORAGE_KEYS.SHIFT_PREFIX + bId + '_' + d + '_' + sh);
+              });
+            } else {
+              const rawLocal = safeGetItem('diwan_day_ops_' + bId + '_' + d);
+              if (rawLocal) {
+                const parsed = safeJsonParse(rawLocal);
+                if (parsed && parsed.items) {
+                  const sections = getBranchSections(bId, false);
+                  sections.forEach(sec => {
+                    const isWh = isWarehouseSection(sec) || sec.targetRole === 'warehouse' || isSectionSingleShift(sec, bId);
+                    if ((scope === 'floor' && !isWh) || (scope === 'warehouse' && isWh)) {
+                      if (sec.items) {
+                        sec.items.forEach(it => {
+                          delete parsed.items[it.rawId];
+                        });
+                      }
+                    }
+                  });
+                  safeSetItem('diwan_day_ops_' + bId + '_' + d, JSON.stringify(parsed));
+                }
+              }
+            }
+
+            // 3. Active in-memory state reset if current branch & current date
+            if (bId === currentBranchId && d === currentDate) {
+              if (scope === 'all') {
+                state = { items: {}, temperatures: {}, sectionNotes: {}, handover: {} };
+                safeSetItem('diwan_day_ops_' + currentBranchId + '_' + currentDate, JSON.stringify(state));
+              } else if (state && state.items) {
+                const sections = getBranchSections(currentBranchId, false);
+                sections.forEach(sec => {
+                  const isWh = isWarehouseSection(sec) || sec.targetRole === 'warehouse' || isSectionSingleShift(sec, currentBranchId);
+                  if ((scope === 'floor' && !isWh) || (scope === 'warehouse' && isWh)) {
+                    if (sec.items) {
+                      sec.items.forEach(it => {
+                        delete state.items[it.rawId];
+                      });
+                    }
+                  }
+                });
+                safeSetItem('diwan_day_ops_' + currentBranchId + '_' + currentDate, JSON.stringify(state));
+              }
+              renderAll();
+            }
+
+            deletedDaysCount++;
+          }
+        }
+
+        // 4. Record Security Audit Log
+        if (firebaseDb) {
+          try {
+            await firebaseDb.ref('security_audit').push({
+              timestamp: Date.now(),
+              timeFormatted: new Date().toISOString(),
+              actor: currentSupervisor || 'الإدارة العليا',
+              actorId: typeof currentUserId !== 'undefined' ? currentUserId : 'admin',
+              actorRole: currentUserRole,
+              action: 'CANCEL_OPERATIONS',
+              actionAr: 'إلغاء وتصفير عمليات الفروع',
+              branches: selectedBranches.map(id => getBranchById(id).nameAr),
+              branchIds: selectedBranches,
+              fromDate,
+              toDate,
+              daysCount: dateList.length,
+              scope,
+              scopeAr: scopeLabel
+            });
+          } catch (auditErr) {
+            console.warn('Security audit log failed:', auditErr);
+          }
+        }
+
+        closeCancelOperationsModal();
+        showToast(`✅ تم بنجاح إلغاء وتصفير العمليات لـ (${selectedBranches.length}) فروع للفترة المحددة.`);
+
+        // If Executive Report modal is open, refresh it automatically
+        const reportModal = document.getElementById('executiveDateReportModal');
+        if (reportModal && reportModal.classList.contains('open')) {
+          generateExecutiveDateReport();
+        }
+
+      } catch (err) {
+        console.error('Error cancelling operations:', err);
+        showToast('❌ حدث خطأ أثناء إلغاء العمليات: ' + (err.message || err));
+      } finally {
+        if (confirmBtn) {
+          confirmBtn.disabled = false;
+          confirmBtn.innerText = '⚠️ تأكيد مسح وإلغاء العمليات نهائياً';
+        }
+      }
     }
 
     // Close modal when clicking backdrop (H7)
