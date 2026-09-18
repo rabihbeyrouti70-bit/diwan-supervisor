@@ -755,6 +755,9 @@
 
     function saveBranchSections(branchId, sectionsList, broadcast = true) {
       const bId = branchId || currentBranchId;
+      if (Array.isArray(sectionsList)) {
+        sectionsList.forEach((s, i) => { s.num = i + 1; });
+      }
       const all = getAllBranchSections();
       all[bId] = sectionsList;
       memoryBranchSectionsCache = all;
@@ -957,11 +960,12 @@
         return `
           <div style="background: ${isEnabled ? '#ffffff' : '#f8fafc'}; border: 1.5px solid ${isEnabled ? '#cbd5e1' : '#e2e8f0'}; border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; box-shadow: ${isEnabled ? '0 1px 3px rgba(0,0,0,0.05)' : 'none'}; opacity: ${isEnabled ? '1' : '0.75'};">
             <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 240px;">
+              <span style="font-size: 11px; font-weight: 800; background: #e2e8f0; color: #475569; padding: 3px 8px; border-radius: 6px; min-width: 30px; text-align: center;">#${idx + 1}</span>
               <span style="font-size: 20px; width: 34px; height: 34px; background: ${isEnabled ? '#ecfdf5' : '#e2e8f0'}; border-radius: 8px; display: flex; align-items: center; justify-content: center;">${icon}</span>
               <div>
                 <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                   <strong style="font-size: 13.5px; color: ${isEnabled ? 'var(--secondary)' : '#64748b'};">${escapeHtml(sec.titleAr || sec.titleEn || 'قسم')}</strong>
-                  ${sec.titleEn ? `<small style="font-size: 10.5px; color: var(--text-muted);">(${escapeHtml(sec.titleEn)})</small>` : ''}
+                  ${sec.titleEn ? `<small style="font-size: 10.5px; color: var(--text-muted);">(${escapeHtml((sec.titleEn || '').replace(/^\d+[\.\-\s]+/, ''))})</small>` : ''}
                   ${isCustom ? '<span style="background: #eff6ff; color: #1d4ed8; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid #bfdbfe;">مخصص للفرع</span>' : ''}
                   ${roleTag}
                   ${shiftTag}
@@ -974,6 +978,12 @@
             </div>
 
             <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-outline-white btn-sm" style="padding: 4px 8px; font-size: 11px;" title="تحريك لأعلى" onclick="moveBranchSection('${escapeHtml(branchId)}', '${escapeHtml(sec.id)}', 'up')" ${idx === 0 ? 'disabled style="opacity: 0.35; cursor: not-allowed;"' : ''}>
+                🔼
+              </button>
+              <button type="button" class="btn btn-outline-white btn-sm" style="padding: 4px 8px; font-size: 11px;" title="تحريك لأسفل" onclick="moveBranchSection('${escapeHtml(branchId)}', '${escapeHtml(sec.id)}', 'down')" ${idx === sections.length - 1 ? 'disabled style="opacity: 0.35; cursor: not-allowed;"' : ''}>
+                🔽
+              </button>
               <button type="button" class="btn btn-outline-white btn-sm" style="padding: 4px 10px; font-size: 11.5px; color: ${isEnabled ? '#d97706' : '#059669'}; border-color: ${isEnabled ? '#fde68a' : '#a7f3d0'};" onclick="toggleBranchSection('${escapeHtml(branchId)}', '${escapeHtml(sec.id)}')">
                 ${isEnabled ? 'تعطيل للفرع ⏸️' : 'تفعيل للفرع ▶️'}
               </button>
@@ -990,6 +1000,36 @@
         `;
       }).join('');
     }
+
+    function moveBranchSection(branchId, secId, direction) {
+      const sections = JSON.parse(JSON.stringify(getBranchSections(branchId, true)));
+      const idx = sections.findIndex(s => s.id === secId);
+      if (idx === -1) return;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= sections.length) return;
+
+      const temp = sections[idx];
+      sections[idx] = sections[targetIdx];
+      sections[targetIdx] = temp;
+
+      sections.forEach((s, i) => { s.num = i + 1; });
+      saveBranchSections(branchId, sections);
+      renderBranchSectionsList();
+    }
+    window.moveBranchSection = moveBranchSection;
+
+    function reorderBranchSectionsByRole(branchId) {
+      const bId = branchId || getSelectedBranchForTasks();
+      const sections = JSON.parse(JSON.stringify(getBranchSections(bId, true)));
+      const floorSecs = sections.filter(s => !isWarehouseSection(s) && s.targetRole !== 'warehouse');
+      const whSecs = sections.filter(s => isWarehouseSection(s) || s.targetRole === 'warehouse');
+      const reordered = [...floorSecs, ...whSecs];
+      reordered.forEach((s, i) => { s.num = i + 1; });
+      saveBranchSections(bId, reordered);
+      renderBranchSectionsList();
+      showToast('🔄 تم ترتيب المهام: مهام الصالة أولاً تليها مهام المستودع');
+    }
+    window.reorderBranchSectionsByRole = reorderBranchSectionsByRole;
 
     function toggleBranchSection(branchId, secId) {
       const sections = JSON.parse(JSON.stringify(getBranchSections(branchId, true)));
@@ -1027,10 +1067,23 @@
 
       // Add fresh copy
       const newSec = JSON.parse(JSON.stringify(tmpl));
-      newSec.num = sections.length + 1;
       newSec.disabled = false;
       newSec.isCustom = true;
-      sections.push(newSec);
+      normalizeSection(newSec);
+
+      const isWh = isWarehouseSection(newSec) || newSec.targetRole === 'warehouse';
+      if (!isWh) {
+        const firstWhIndex = sections.findIndex(s => isWarehouseSection(s) || s.targetRole === 'warehouse');
+        if (firstWhIndex !== -1) {
+          sections.splice(firstWhIndex, 0, newSec);
+        } else {
+          sections.push(newSec);
+        }
+      } else {
+        sections.push(newSec);
+      }
+
+      sections.forEach((s, i) => { s.num = i + 1; });
 
       saveBranchSections(branchId, sections);
       renderBranchSectionsList();
@@ -1170,7 +1223,7 @@
       } else {
         // Create new
         const newSecId = 'sec_custom_' + Date.now();
-        sections.push({
+        const newSec = {
           id: newSecId,
           num: sections.length + 1,
           titleAr: nameAr,
@@ -1184,7 +1237,21 @@
           disabled: false,
           isCustom: true,
           note: nameAr
-        });
+        };
+
+        // Keep sections logically grouped: insert floor tasks before warehouse tasks
+        if (targetRole === 'floor') {
+          const firstWhIndex = sections.findIndex(s => isWarehouseSection(s) || s.targetRole === 'warehouse');
+          if (firstWhIndex !== -1) {
+            sections.splice(firstWhIndex, 0, newSec);
+          } else {
+            sections.push(newSec);
+          }
+        } else {
+          sections.push(newSec);
+        }
+
+        sections.forEach((s, i) => { s.num = i + 1; });
       }
 
       saveBranchSections(branchId, sections);
@@ -1204,6 +1271,7 @@
       }
 
       const updated = sections.filter(s => s.id !== secId);
+      updated.forEach((s, i) => { s.num = i + 1; });
       saveBranchSections(branchId, updated);
       renderBranchSectionsList();
       const b = getBranchById(branchId);
@@ -4902,12 +4970,13 @@
         // Section Header with Accordion Toggle (Collapsed by default - مضبوبة افتراضياً)
         const header = document.createElement('div');
         header.className = 'section-header' + (isExpanded ? ' active' : ' is-collapsed');
+        const cleanTitleEn = (sec.titleEn || '').replace(/^\d+[\.\-\s]+/, '');
         header.innerHTML = `
           <div class="section-title-group">
-            <div class="section-num">${sec.num}</div>
+            <div class="section-num">${idx + 1}</div>
             <div>
               <span class="section-title-ar">${escapeHtml(sec.titleAr)} ${roleBadgeHtml} ${shiftModeBadgeHtml}</span>
-              <span class="section-title-en">${escapeHtml(sec.titleEn)}</span>
+              <span class="section-title-en">${escapeHtml(cleanTitleEn || sec.titleEn)}</span>
             </div>
           </div>
           <div class="section-meta">
