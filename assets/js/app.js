@@ -8170,7 +8170,7 @@
 
           branchesReport.push({
             branch: b,
-            activeDaysCount,
+            activeDaysCount: branchActiveDaysCount,
             totalDays: dateList.length,
             totalRequired: branchTotalRequired,
             totalDone: branchTotalDone,
