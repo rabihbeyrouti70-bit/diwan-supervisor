@@ -3501,6 +3501,31 @@
       return copy;
     }
 
+    const DELETED_AUDIO_STORAGE_KEY = 'diwan_deleted_audio_tombstones';
+    let deletedAudioTombstones = new Map(); // key -> deletedAt timestamp (ms)
+    // Clear any poisoned legacy session storage tombstones
+    try { sessionStorage.removeItem(DELETED_AUDIO_STORAGE_KEY); } catch (e) {}
+
+    function isAudioTombstoned(secId, shift, cloudAudio) {
+      const key = shift ? (secId + '_' + shift) : secId;
+      const delTime = deletedAudioTombstones.get(key) || (!shift ? deletedAudioTombstones.get(secId) : null);
+      if (!delTime) return false;
+      // Expire tombstones after 45 seconds
+      if (Date.now() - delTime > 45000) {
+        deletedAudioTombstones.delete(key);
+        return false;
+      }
+      // If cloud audio has createdAt newer than delTime, it is a newly recorded audio!
+      if (cloudAudio && typeof cloudAudio === 'object' && cloudAudio.createdAt) {
+        const cloudTime = new Date(cloudAudio.createdAt).getTime();
+        if (cloudTime > delTime) {
+          deletedAudioTombstones.delete(key);
+          return false;
+        }
+      }
+      return true;
+    }
+
     function mergeDayStates(localState, cloudState) {
       if (!cloudState) return localState || { items: {}, temperatures: {}, sectionNotes: {}, sectionAudio: {} };
       if (!localState) return cloudState;
@@ -3554,21 +3579,19 @@
 
       if (cloudState.sectionAudio && typeof cloudState.sectionAudio === 'object') {
         for (const secId in cloudState.sectionAudio) {
-          if (deletedAudioTombstones.has(secId) && (!localState.sectionAudio || !localState.sectionAudio[secId])) {
-            continue; // Section audio explicitly deleted locally
+          if (typeof isAudioTombstoned === 'function' && isAudioTombstoned(secId, null, cloudState.sectionAudio[secId])) {
+            continue; // Section audio explicitly deleted locally recently
           }
           if (!merged.sectionAudio[secId] || typeof merged.sectionAudio[secId] !== 'object') {
-            if (!deletedAudioTombstones.has(secId)) {
-              merged.sectionAudio[secId] = cloudState.sectionAudio[secId];
-            }
+            merged.sectionAudio[secId] = { ...cloudState.sectionAudio[secId] };
           } else if (typeof cloudState.sectionAudio[secId] === 'object') {
             const cloudShifts = cloudState.sectionAudio[secId];
             for (const sh in cloudShifts) {
-              if (deletedAudioTombstones.has(secId + '_' + sh) || deletedAudioTombstones.has(secId)) {
-                continue; // Shift audio explicitly deleted locally
+              const cloudAudio = cloudShifts[sh];
+              if (typeof isAudioTombstoned === 'function' && isAudioTombstoned(secId, sh, cloudAudio)) {
+                continue; // Shift audio explicitly deleted locally recently
               }
               const localAudio = merged.sectionAudio[secId] && merged.sectionAudio[secId][sh];
-              const cloudAudio = cloudShifts[sh];
               if (localAudio && cloudAudio && typeof localAudio === 'object' && typeof cloudAudio === 'object') {
                 const localTime = new Date(localAudio.createdAt || localAudio.localSavedAt || 0).getTime();
                 const cloudTime = new Date(cloudAudio.createdAt || 0).getTime();
@@ -3703,6 +3726,28 @@
         const rawCloudVal = snapshot.val();
         if (rawCloudVal) {
           const cloudVal = deserializeStateFromFirebase(rawCloudVal);
+
+          // Detect new incoming audio notes to auto-expand section & notify manager
+          if (cloudVal && cloudVal.sectionAudio && typeof cloudVal.sectionAudio === 'object') {
+            for (const sId in cloudVal.sectionAudio) {
+              const cloudShs = cloudVal.sectionAudio[sId];
+              if (cloudShs && typeof cloudShs === 'object') {
+                for (const sh in cloudShs) {
+                  const cAudio = cloudShs[sh];
+                  const lAudio = state.sectionAudio && state.sectionAudio[sId] && state.sectionAudio[sId][sh];
+                  if (cAudio && (!lAudio || (cAudio.createdAt && lAudio.createdAt !== cAudio.createdAt))) {
+                    expandedSections.add(sId);
+                    if (Date.now() - lastLocalSaveTime > 2500) {
+                      const sec = getBranchSections(currentBranchId, false).find(s => s.id === sId);
+                      const secName = sec ? sec.titleAr : sId;
+                      showToast("🎙️ تسجيل صوتي جديد في قسم: " + secName);
+                    }
+                  }
+                }
+              }
+            }
+          }
+
           const merged = mergeDayStates(state, cloudVal);
           normalizeDayState(merged);
           
@@ -3711,13 +3756,6 @@
           safeSetItem(key, JSON.stringify(state));
           renderAll();
 
-          // If local device had items not yet stored in cloud, upload merged state
-          const serializedMerged = serializeStateForFirebase(state);
-          if (JSON.stringify(serializedMerged) !== JSON.stringify(rawCloudVal)) {
-            firebaseRef.set(serializedMerged).catch(e => console.warn("Cloud merge push failed:", e));
-          } else if (Date.now() - lastLocalSaveTime > 2000) {
-            showToast("☁️ تم استلام تحديثات العمليات السحابية من الفرع");
-          }
         } else if (state && Object.keys(state.items || {}).length > 0) {
           const payload = serializeStateForFirebase(state);
           firebaseRef.set(payload).catch(e => console.warn("Initial cloud seed failed:", e));
@@ -3751,11 +3789,15 @@
        UI RENDERING
        ============================================================ */
     function renderAll() {
+      const scrollY = window.scrollY;
       renderScoreboard();
       renderExcelSheetTabs();
       renderSections();
       updateStats();
       updatePrintHeader();
+      if (scrollY > 0 && Math.abs(window.scrollY - scrollY) > 5) {
+        window.scrollTo({ top: scrollY, behavior: 'instant' });
+      }
     }
 
     function renderHandoverBanner() {
@@ -5029,7 +5071,7 @@
           if (typeof state.sectionAudio[sec.id] === 'object') {
             for (const sh in state.sectionAudio[sec.id]) {
               const a = state.sectionAudio[sec.id][sh];
-              if (a && (typeof a === 'string' || (typeof a === 'object' && a.audioBase64))) {
+              if (a && (typeof a === 'string' || (typeof a === 'object' && (a.audioBase64 || a.url)))) {
                 hasSecAudio = true;
                 secAudioCount++;
               }
@@ -5055,8 +5097,8 @@
               </span>
             ` : ''}
             ${hasSecAudio ? `
-              <span class="section-audio-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;" title="يوجد ملاحظة صوتية مسجلة في هذا القسم">
-                🎙️ صوتي ${secAudioCount > 1 ? `(${secAudioCount})` : ''}
+              <span class="section-audio-badge" style="background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;" title="يوجد ملاحظة صوتية مسجلة في هذا القسم">
+                🎙️ تسجيل صوتي ${secAudioCount > 1 ? `(${secAudioCount})` : ''}
               </span>
             ` : ''}
             <span class="section-badge ${isFullyDone ? 'completed' : ''}">
@@ -5434,21 +5476,12 @@
           const sectionAudios = [];
           if (state.sectionAudio && state.sectionAudio[sec.id]) {
             if (typeof state.sectionAudio[sec.id] === 'object') {
-              if (activeShiftView === 'all') {
-                // In Matrix 'all' view (Managers): Show all shifts that have audio!
-                for (const shId in state.sectionAudio[sec.id]) {
-                  const rawA = state.sectionAudio[sec.id][shId];
-                  const url = (rawA && typeof rawA === 'object') ? (rawA.audioBase64 || '') : (typeof rawA === 'string' ? rawA : '');
-                  if (url) {
-                    sectionAudios.push({ shiftId: shId, raw: rawA, url: url });
-                  }
-                }
-              } else {
-                // In specific shift view: show audio for that shift (or single shift)
-                const rawA = state.sectionAudio[sec.id][targetNoteSh];
+              // Always collect and display all available shift recordings for this section
+              for (const shId in state.sectionAudio[sec.id]) {
+                const rawA = state.sectionAudio[sec.id][shId];
                 const url = (rawA && typeof rawA === 'object') ? (rawA.audioBase64 || '') : (typeof rawA === 'string' ? rawA : '');
                 if (url) {
-                  sectionAudios.push({ shiftId: targetNoteSh, raw: rawA, url: url });
+                  sectionAudios.push({ shiftId: shId, raw: rawA, url: url });
                 }
               }
             } else if (typeof state.sectionAudio[sec.id] === 'string' && state.sectionAudio[sec.id]) {
@@ -6175,22 +6208,6 @@
     /* ============================================================
        SECTION VOICE NOTES ENGINE (الملاحظات الصوتية للمهام والأقسام)
        ============================================================ */
-    const DELETED_AUDIO_STORAGE_KEY = 'diwan_deleted_audio_tombstones';
-    let deletedAudioTombstones = new Set();
-    try {
-      const storedTombstones = sessionStorage.getItem(DELETED_AUDIO_STORAGE_KEY);
-      if (storedTombstones) {
-        const arr = JSON.parse(storedTombstones);
-        if (Array.isArray(arr)) deletedAudioTombstones = new Set(arr);
-      }
-    } catch (e) {}
-
-    function persistAudioTombstones() {
-      try {
-        sessionStorage.setItem(DELETED_AUDIO_STORAGE_KEY, JSON.stringify(Array.from(deletedAudioTombstones)));
-      } catch (e) {}
-    }
-
     let activeSectionRecordingId = null;
     let activeSectionRecordingShift = null;
     let sectionMediaRecorder = null;
@@ -6211,10 +6228,9 @@
       const isSingleShift = isSectionSingleShift(sec, currentBranchId);
       const targetSh = shift || (isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView));
 
-      // Clear tombstones for this section and shift
+      // Clear tombstones for this section and shift immediately
       deletedAudioTombstones.delete(secId + '_' + targetSh);
       deletedAudioTombstones.delete(secId);
-      persistAudioTombstones();
 
       const audioObj = {
         ...audioData,
@@ -6248,7 +6264,8 @@
       const isSingleShift = isSectionSingleShift(sec, currentBranchId);
       const targetSh = shift || (isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView));
 
-      deletedAudioTombstones.add(secId + '_' + targetSh);
+      deletedAudioTombstones.set(secId + '_' + targetSh, Date.now());
+      deletedAudioTombstones.set(secId, Date.now());
 
       if (state.sectionAudio) {
         if (state.sectionAudio[secId]) {
@@ -6256,16 +6273,13 @@
             delete state.sectionAudio[secId][targetSh];
             if (isSingleShift || Object.keys(state.sectionAudio[secId]).length === 0) {
               delete state.sectionAudio[secId];
-              deletedAudioTombstones.add(secId);
             }
           } else {
             delete state.sectionAudio[secId];
-            deletedAudioTombstones.add(secId);
           }
         }
       }
 
-      persistAudioTombstones();
       expandedSections.add(secId);
       saveState();
 
