@@ -5022,11 +5022,23 @@
         header.className = 'section-header' + (isExpanded ? ' active' : ' is-collapsed');
         const cleanTitleEn = (sec.titleEn || '').replace(/^\d+[\.\-\s]+/, '');
 
-        // Check if audio exists for header badge
-        const headerTargetSh = isSingleShift ? 'morning' : (activeShiftView === 'all' ? currentShiftType : activeShiftView);
-        const headerSecAudio = (state.sectionAudio && state.sectionAudio[sec.id]) ?
-          ((typeof state.sectionAudio[sec.id] === 'object' && state.sectionAudio[sec.id][headerTargetSh]) || (typeof state.sectionAudio[sec.id] === 'string' ? state.sectionAudio[sec.id] : null)) : null;
-        const hasSecAudio = !!(headerSecAudio && (typeof headerSecAudio === 'string' ? headerSecAudio : headerSecAudio.audioBase64));
+        // Check if audio exists for header badge (across any shift in section)
+        let hasSecAudio = false;
+        let secAudioCount = 0;
+        if (state.sectionAudio && state.sectionAudio[sec.id]) {
+          if (typeof state.sectionAudio[sec.id] === 'object') {
+            for (const sh in state.sectionAudio[sec.id]) {
+              const a = state.sectionAudio[sec.id][sh];
+              if (a && (typeof a === 'string' || (typeof a === 'object' && a.audioBase64))) {
+                hasSecAudio = true;
+                secAudioCount++;
+              }
+            }
+          } else if (typeof state.sectionAudio[sec.id] === 'string' && state.sectionAudio[sec.id]) {
+            hasSecAudio = true;
+            secAudioCount = 1;
+          }
+        }
 
         header.innerHTML = `
           <div class="section-title-group">
@@ -5044,7 +5056,7 @@
             ` : ''}
             ${hasSecAudio ? `
               <span class="section-audio-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;" title="يوجد ملاحظة صوتية مسجلة في هذا القسم">
-                🎙️ صوتي
+                🎙️ صوتي ${secAudioCount > 1 ? `(${secAudioCount})` : ''}
               </span>
             ` : ''}
             <span class="section-badge ${isFullyDone ? 'completed' : ''}">
@@ -5418,21 +5430,45 @@
             (state.sectionNotes[sec.id][targetNoteSh] || '') :
             ((state.sectionNotes && state.sectionNotes[sec.id]) || '');
 
-          const rawAudio = (state.sectionAudio && state.sectionAudio[sec.id]) ?
-            ((typeof state.sectionAudio[sec.id] === 'object' && state.sectionAudio[sec.id][targetNoteSh]) || (typeof state.sectionAudio[sec.id] === 'string' ? state.sectionAudio[sec.id] : null)) : null;
-          const audioUrl = (rawAudio && typeof rawAudio === 'object') ? (rawAudio.audioBase64 || '') : (typeof rawAudio === 'string' ? rawAudio : '');
-          const hasAudio = !!audioUrl;
+          // Collect all audio notes for this section
+          const sectionAudios = [];
+          if (state.sectionAudio && state.sectionAudio[sec.id]) {
+            if (typeof state.sectionAudio[sec.id] === 'object') {
+              if (activeShiftView === 'all') {
+                // In Matrix 'all' view (Managers): Show all shifts that have audio!
+                for (const shId in state.sectionAudio[sec.id]) {
+                  const rawA = state.sectionAudio[sec.id][shId];
+                  const url = (rawA && typeof rawA === 'object') ? (rawA.audioBase64 || '') : (typeof rawA === 'string' ? rawA : '');
+                  if (url) {
+                    sectionAudios.push({ shiftId: shId, raw: rawA, url: url });
+                  }
+                }
+              } else {
+                // In specific shift view: show audio for that shift (or single shift)
+                const rawA = state.sectionAudio[sec.id][targetNoteSh];
+                const url = (rawA && typeof rawA === 'object') ? (rawA.audioBase64 || '') : (typeof rawA === 'string' ? rawA : '');
+                if (url) {
+                  sectionAudios.push({ shiftId: targetNoteSh, raw: rawA, url: url });
+                }
+              }
+            } else if (typeof state.sectionAudio[sec.id] === 'string' && state.sectionAudio[sec.id]) {
+              sectionAudios.push({ shiftId: 'morning', raw: state.sectionAudio[sec.id], url: state.sectionAudio[sec.id] });
+            }
+          }
+
+          const hasAnyAudio = sectionAudios.length > 0;
           const editable = canEditShift(targetNoteSh);
           const isRecordingThis = (activeSectionRecordingId === sec.id);
+          const targetHasAudio = sectionAudios.some(a => a.shiftId === targetNoteSh);
 
           noteBox.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
               <label style="margin: 0; font-size: 13px; font-weight: 700; color: var(--text-muted);">
                 📝 ملاحظات عامة لقسم ${escapeHtml(sec.titleAr)}:
               </label>
-              ${hasAudio ? `
+              ${hasAnyAudio ? `
                 <span style="font-size: 11px; font-weight: 800; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 999px; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;">
-                  🎙️ يوجد تسجيل صوتي
+                  🎙️ يوجد (${sectionAudios.length}) تسجيل صوتي
                 </span>
               ` : ''}
             </div>
@@ -5442,7 +5478,7 @@
               onchange="setSectionNote('${escapeHtml(sec.id)}', this.value)">${escapeHtml(savedNote)}</textarea>
 
             <!-- VOICE NOTE CONTROLS / PLAYER -->
-            <div class="section-audio-container" id="sectionAudioContainer_${escapeHtml(sec.id)}" style="margin-top: 10px;">
+            <div class="section-audio-container" id="sectionAudioContainer_${escapeHtml(sec.id)}" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
               
               <!-- Active Recording Box (shown while recording) -->
               <div id="sectionVoiceRecBox_${escapeHtml(sec.id)}" class="section-voice-box" style="display: ${isRecordingThis ? 'flex' : 'none'}; align-items: center; justify-content: space-between; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 8px; padding: 8px 12px; gap: 10px; flex-wrap: wrap;">
@@ -5461,44 +5497,53 @@
                 </div>
               </div>
 
-              <!-- Audio Player Box (shown when saved voice note exists) -->
-              ${hasAudio ? `
-                <div class="section-voice-box" style="background: #f0fdf4; border: 1.5px solid #bbf7d0; border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px;">
-                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                      <span style="font-size: 16px;">🎙️</span>
-                      <strong style="font-size: 12px; color: #166534;">الملاحظة الصوتية لقسم (${escapeHtml(sec.titleAr)}):</strong>
-                    </div>
-                    ${editable ? `
+              <!-- Audio Player Boxes (shown for all available recordings in section) -->
+              ${sectionAudios.map(a => {
+                const shiftName = getShiftName(currentBranchId, a.shiftId) || (a.shiftId === 'morning' ? 'الصباحية' : (a.shiftId === 'evening' ? 'المسائية' : 'الليلية'));
+                const shiftIcon = a.shiftId === 'morning' ? '☀️' : (a.shiftId === 'evening' ? '🌆' : '🌙');
+                const canEditThis = canEditShift(a.shiftId);
+                return `
+                  <div class="section-voice-box" style="background: #f0fdf4; border: 1.5px solid #bbf7d0; border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
                       <div style="display: flex; align-items: center; gap: 6px;">
-                        <button type="button" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}', '${escapeHtml(targetNoteSh)}')" title="إعادة تسجيل الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #0284c7; border-color: #bae6fd; background: white; font-weight: 700;">
-                          🔄 إعادة تسجيل
-                        </button>
-                        <button type="button" class="btn btn-outline-white btn-sm" onclick="deleteSectionAudio('${escapeHtml(sec.id)}', '${escapeHtml(targetNoteSh)}')" title="حذف الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #dc2626; border-color: #fca5a5; background: white; font-weight: 700;">
-                          🗑️ حذف
-                        </button>
+                        <span style="font-size: 16px;">🎙️</span>
+                        <strong style="font-size: 12px; color: #166534;">
+                          الملاحظة الصوتية (${escapeHtml(sec.titleAr)}) – ${shiftIcon} ${escapeHtml(shiftName)}:
+                        </strong>
                       </div>
-                    ` : ''}
+                      ${canEditThis ? `
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                          <button type="button" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}', '${escapeHtml(a.shiftId)}')" title="إعادة تسجيل الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #0284c7; border-color: #bae6fd; background: white; font-weight: 700;">
+                            🔄 إعادة تسجيل
+                          </button>
+                          <button type="button" class="btn btn-outline-white btn-sm" onclick="deleteSectionAudio('${escapeHtml(sec.id)}', '${escapeHtml(a.shiftId)}')" title="حذف الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #dc2626; border-color: #fca5a5; background: white; font-weight: 700;">
+                            🗑️ حذف
+                          </button>
+                        </div>
+                      ` : ''}
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                      <audio controls src="${a.url}" style="height: 34px; flex: 1; min-width: 200px; outline: none; border-radius: 6px;"></audio>
+                      ${(a.raw && typeof a.raw === 'object' && (a.raw.recordedBy || a.raw.timestamp)) ? `
+                        <div style="font-size: 11px; color: #15803d; font-weight: 700;">
+                          <span>بصوت: <strong>${escapeHtml(a.raw.recordedBy || 'المشرف')}</strong></span>
+                          ${a.raw.timestamp ? ` • <span>${escapeHtml(a.raw.timestamp)}</span>` : ''}
+                          ${a.raw.duration ? ` • <span>(${a.raw.duration} ثانية)</span>` : ''}
+                        </div>
+                      ` : ''}
+                    </div>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                    <audio controls src="${audioUrl}" style="height: 34px; flex: 1; min-width: 220px; outline: none; border-radius: 6px;"></audio>
-                    ${(rawAudio && typeof rawAudio === 'object' && (rawAudio.recordedBy || rawAudio.timestamp)) ? `
-                      <div style="font-size: 11px; color: #15803d; font-weight: 700;">
-                        <span>بصوت: <strong>${escapeHtml(rawAudio.recordedBy || 'المشرف')}</strong></span>
-                        ${rawAudio.timestamp ? ` • <span>${escapeHtml(rawAudio.timestamp)}</span>` : ''}
-                        ${rawAudio.duration ? ` • <span>(${rawAudio.duration} ثانية)</span>` : ''}
-                      </div>
-                    ` : ''}
-                  </div>
-                </div>
-              ` : `
-                <!-- Button to start recording if no audio exists and shift is editable -->
-                ${editable ? `
+                `;
+              }).join('')}
+
+              <!-- Button to start recording if shift is editable and not recorded yet -->
+              ${(editable && !targetHasAudio) ? `
+                <div>
                   <button type="button" id="btnStartSecVoice_${escapeHtml(sec.id)}" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}', '${escapeHtml(targetNoteSh)}')" style="display: ${isRecordingThis ? 'none' : 'inline-flex'}; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #0284c7; border-color: #bae6fd; background: #f0f9ff; padding: 5px 12px; border-radius: 6px;">
                     🎙️ تسجيل ملاحظة صوتية للقسم
                   </button>
-                ` : ''}
-              `}
+                </div>
+              ` : ''}
 
             </div>
           `;
@@ -6179,6 +6224,12 @@
       state.sectionAudio[secId][targetSh] = audioObj;
       expandedSections.add(secId);
       saveState();
+
+      // Direct child node write for guaranteed instant real-time sync to all managers
+      if (firebaseRef) {
+        firebaseRef.child('sectionAudio/' + encodeFirebaseKey(secId) + '/' + targetSh).set(audioObj).catch(e => console.warn("Direct Firebase audio write failed:", e));
+      }
+
       renderAll();
       showToast("🎙️ تم حفظ الملاحظة الصوتية للقسم");
     }
