@@ -3459,7 +3459,11 @@
       if (s.sectionAudio && typeof s.sectionAudio === 'object') {
         copy.sectionAudio = {};
         for (const k in s.sectionAudio) {
-          copy.sectionAudio[encodeFirebaseKey(k)] = s.sectionAudio[k];
+          if (s.sectionAudio[k] && typeof s.sectionAudio[k] === 'object' && Object.keys(s.sectionAudio[k]).length > 0) {
+            copy.sectionAudio[encodeFirebaseKey(k)] = s.sectionAudio[k];
+          } else if (typeof s.sectionAudio[k] === 'string' && s.sectionAudio[k].length > 0) {
+            copy.sectionAudio[encodeFirebaseKey(k)] = s.sectionAudio[k];
+          }
         }
       }
       return copy;
@@ -3549,14 +3553,39 @@
       }
 
       if (cloudState.sectionAudio) {
+        // If an audio was removed in the cloud, remove it from merged state as well
+        if (merged.sectionAudio && typeof merged.sectionAudio === 'object') {
+          for (const secId in merged.sectionAudio) {
+            if (!cloudState.sectionAudio[secId]) {
+              delete merged.sectionAudio[secId];
+            } else if (typeof merged.sectionAudio[secId] === 'object' && typeof cloudState.sectionAudio[secId] === 'object') {
+              for (const sh in merged.sectionAudio[secId]) {
+                if (!cloudState.sectionAudio[secId][sh]) {
+                  delete merged.sectionAudio[secId][sh];
+                }
+              }
+              if (Object.keys(merged.sectionAudio[secId]).length === 0) {
+                delete merged.sectionAudio[secId];
+              }
+            }
+          }
+        }
         for (const secId in cloudState.sectionAudio) {
+          if (deletedAudioTombstones.has(secId) && (!localState.sectionAudio || !localState.sectionAudio[secId])) {
+            continue; // Section audio explicitly deleted locally
+          }
           if (!merged.sectionAudio[secId] || typeof merged.sectionAudio[secId] !== 'object') {
-            merged.sectionAudio[secId] = cloudState.sectionAudio[secId];
+            if (!deletedAudioTombstones.has(secId)) {
+              merged.sectionAudio[secId] = cloudState.sectionAudio[secId];
+            }
           } else if (typeof cloudState.sectionAudio[secId] === 'object') {
-            merged.sectionAudio[secId] = {
-              ...merged.sectionAudio[secId],
-              ...cloudState.sectionAudio[secId]
-            };
+            const cloudShifts = cloudState.sectionAudio[secId];
+            for (const sh in cloudShifts) {
+              if (deletedAudioTombstones.has(secId + '_' + sh) || deletedAudioTombstones.has(secId)) {
+                continue; // Shift audio explicitly deleted locally
+              }
+              merged.sectionAudio[secId][sh] = cloudShifts[sh];
+            }
           }
         }
       }
@@ -5416,25 +5445,25 @@
               ` : ''}
             </div>
 
-            <textarea id="sectionNotesText_${sec.id}" class="section-notes-textarea" ${!editable ? 'readonly style="background: #f8fafc; cursor: not-allowed;"' : ''}
+            <textarea id="sectionNotesText_${escapeHtml(sec.id)}" class="section-notes-textarea" ${!editable ? 'readonly style="background: #f8fafc; cursor: not-allowed;"' : ''}
               placeholder="${editable ? `اكتب أي ملاحظات تخص قسم ${escapeHtml(sec.titleAr)}...` : 'للقراءة فقط...'}" 
-              onchange="setSectionNote('${sec.id}', this.value)">${escapeHtml(savedNote)}</textarea>
+              onchange="setSectionNote('${escapeHtml(sec.id)}', this.value)">${escapeHtml(savedNote)}</textarea>
 
             <!-- VOICE NOTE CONTROLS / PLAYER -->
-            <div class="section-audio-container" id="sectionAudioContainer_${sec.id}" style="margin-top: 10px;">
+            <div class="section-audio-container" id="sectionAudioContainer_${escapeHtml(sec.id)}" style="margin-top: 10px;">
               
               <!-- Active Recording Box (shown while recording) -->
-              <div id="sectionVoiceRecBox_${sec.id}" class="section-voice-box" style="display: ${isRecordingThis ? 'flex' : 'none'}; align-items: center; justify-content: space-between; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 8px; padding: 8px 12px; gap: 10px; flex-wrap: wrap;">
+              <div id="sectionVoiceRecBox_${escapeHtml(sec.id)}" class="section-voice-box" style="display: ${isRecordingThis ? 'flex' : 'none'}; align-items: center; justify-content: space-between; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 8px; padding: 8px 12px; gap: 10px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <span class="rec-dot-blink" style="width: 10px; height: 10px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
                   <span style="font-size: 12px; font-weight: 800; color: #dc2626;">جاري تسجيل الملاحظة الصوتية...</span>
-                  <span id="sectionVoiceTimer_${sec.id}" style="font-family: monospace; font-weight: 800; font-size: 13.5px; color: #dc2626; background: #fee2e2; padding: 2px 6px; border-radius: 4px;">00:00</span>
+                  <span id="sectionVoiceTimer_${escapeHtml(sec.id)}" style="font-family: monospace; font-weight: 800; font-size: 13.5px; color: #dc2626; background: #fee2e2; padding: 2px 6px; border-radius: 4px;">00:00</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
-                  <button type="button" class="btn btn-sm btn-primary" onclick="stopSectionVoiceRecording('${sec.id}')" style="background: #059669; border-color: #059669; font-size: 11.5px; padding: 4px 10px; font-weight: 700;">
+                  <button type="button" class="btn btn-sm btn-primary" onclick="stopSectionVoiceRecording('${escapeHtml(sec.id)}')" style="background: #059669; border-color: #059669; font-size: 11.5px; padding: 4px 10px; font-weight: 700;">
                     ⏹️ إيقاف وحفظ
                   </button>
-                  <button type="button" class="btn btn-sm btn-outline-white" onclick="cancelSectionVoiceRecording('${sec.id}')" style="font-size: 11.5px; padding: 4px 8px; color: #dc2626; border-color: #fca5a5;">
+                  <button type="button" class="btn btn-sm btn-outline-white" onclick="cancelSectionVoiceRecording('${escapeHtml(sec.id)}')" style="font-size: 11.5px; padding: 4px 8px; color: #dc2626; border-color: #fca5a5;">
                     ❌ إلغاء
                   </button>
                 </div>
@@ -5450,10 +5479,10 @@
                     </div>
                     ${editable ? `
                       <div style="display: flex; align-items: center; gap: 6px;">
-                        <button type="button" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${sec.id}')" title="إعادة تسجيل الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #0284c7; border-color: #bae6fd; background: white; font-weight: 700;">
+                        <button type="button" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}')" title="إعادة تسجيل الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #0284c7; border-color: #bae6fd; background: white; font-weight: 700;">
                           🔄 إعادة تسجيل
                         </button>
-                        <button type="button" class="btn btn-outline-white btn-sm" onclick="deleteSectionAudio('${sec.id}')" title="حذف الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #dc2626; border-color: #fca5a5; background: white; font-weight: 700;">
+                        <button type="button" class="btn btn-outline-white btn-sm" onclick="deleteSectionAudio('${escapeHtml(sec.id)}', '${escapeHtml(targetNoteSh)}')" title="حذف الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #dc2626; border-color: #fca5a5; background: white; font-weight: 700;">
                           🗑️ حذف
                         </button>
                       </div>
@@ -5473,7 +5502,7 @@
               ` : `
                 <!-- Button to start recording if no audio exists and shift is editable -->
                 ${editable ? `
-                  <button type="button" id="btnStartSecVoice_${sec.id}" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${sec.id}')" style="display: ${isRecordingThis ? 'none' : 'inline-flex'}; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #0284c7; border-color: #bae6fd; background: #f0f9ff; padding: 5px 12px; border-radius: 6px;">
+                  <button type="button" id="btnStartSecVoice_${escapeHtml(sec.id)}" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}')" style="display: ${isRecordingThis ? 'none' : 'inline-flex'}; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #0284c7; border-color: #bae6fd; background: #f0f9ff; padding: 5px 12px; border-radius: 6px;">
                     🎙️ تسجيل ملاحظة صوتية للقسم
                   </button>
                 ` : ''}
@@ -6109,6 +6138,22 @@
     /* ============================================================
        SECTION VOICE NOTES ENGINE (الملاحظات الصوتية للمهام والأقسام)
        ============================================================ */
+    const DELETED_AUDIO_STORAGE_KEY = 'diwan_deleted_audio_tombstones';
+    let deletedAudioTombstones = new Set();
+    try {
+      const storedTombstones = sessionStorage.getItem(DELETED_AUDIO_STORAGE_KEY);
+      if (storedTombstones) {
+        const arr = JSON.parse(storedTombstones);
+        if (Array.isArray(arr)) deletedAudioTombstones = new Set(arr);
+      }
+    } catch (e) {}
+
+    function persistAudioTombstones() {
+      try {
+        sessionStorage.setItem(DELETED_AUDIO_STORAGE_KEY, JSON.stringify(Array.from(deletedAudioTombstones)));
+      } catch (e) {}
+    }
+
     let activeSectionRecordingId = null;
     let sectionMediaRecorder = null;
     let sectionAudioStream = null;
@@ -6128,27 +6173,66 @@
       const isSingleShift = isSectionSingleShift(sec, currentBranchId);
       const targetSh = isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
 
+      // Clear tombstones for this section and shift
+      deletedAudioTombstones.delete(secId + '_' + targetSh);
+      deletedAudioTombstones.delete(secId);
+      persistAudioTombstones();
+
       state.sectionAudio[secId][targetSh] = audioData;
       expandedSections.add(secId);
       saveState();
-      renderSections(document.getElementById('sectionsContainer'), activeFilter, activeShiftView);
+      renderAll();
       showToast("🎙️ تم حفظ الملاحظة الصوتية للقسم");
     }
 
-    function deleteSectionAudio(secId) {
+    function deleteSectionAudio(secId, shift) {
       if (!confirm("هل أنت متأكد من حذف الملاحظة الصوتية لهذا القسم؟")) return;
-      if (state.sectionAudio && state.sectionAudio[secId]) {
-        const sections = getBranchSections(currentBranchId, true);
-        const sec = sections.find(s => s.id === secId);
-        const isSingleShift = isSectionSingleShift(sec, currentBranchId);
-        const targetSh = isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
 
-        delete state.sectionAudio[secId][targetSh];
-        expandedSections.add(secId);
-        saveState();
-        renderSections(document.getElementById('sectionsContainer'), activeFilter, activeShiftView);
-        showToast("🗑️ تم حذف الملاحظة الصوتية");
+      // Pause all playing audio elements immediately
+      try {
+        const audios = document.querySelectorAll('audio');
+        audios.forEach(a => a.pause());
+      } catch (e) {}
+
+      const sections = getBranchSections(currentBranchId, true);
+      const sec = sections.find(s => s.id === secId);
+      const isSingleShift = isSectionSingleShift(sec, currentBranchId);
+      const targetSh = shift || (isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView));
+
+      deletedAudioTombstones.add(secId + '_' + targetSh);
+
+      if (state.sectionAudio) {
+        if (state.sectionAudio[secId]) {
+          if (typeof state.sectionAudio[secId] === 'object') {
+            delete state.sectionAudio[secId][targetSh];
+            if (isSingleShift || Object.keys(state.sectionAudio[secId]).length === 0) {
+              delete state.sectionAudio[secId];
+              deletedAudioTombstones.add(secId);
+            }
+          } else {
+            delete state.sectionAudio[secId];
+            deletedAudioTombstones.add(secId);
+          }
+        }
       }
+
+      persistAudioTombstones();
+      expandedSections.add(secId);
+      saveState();
+
+      // Explicitly remove from Firebase node
+      if (firebaseRef) {
+        firebaseRef.child('sectionAudio/' + encodeFirebaseKey(secId) + '/' + targetSh).remove().catch(() => {});
+        if (!state.sectionAudio || !state.sectionAudio[secId]) {
+          firebaseRef.child('sectionAudio/' + encodeFirebaseKey(secId)).remove().catch(() => {});
+        }
+        if (!state.sectionAudio || Object.keys(state.sectionAudio).length === 0) {
+          firebaseRef.child('sectionAudio').remove().catch(() => {});
+        }
+      }
+
+      renderAll();
+      showToast("🗑️ تم حذف الملاحظة الصوتية");
     }
 
     async function startSectionVoiceRecording(secId) {
