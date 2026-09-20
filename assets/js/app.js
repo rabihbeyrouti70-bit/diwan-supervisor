@@ -3552,24 +3552,7 @@
         }
       }
 
-      if (cloudState.sectionAudio) {
-        // If an audio was removed in the cloud, remove it from merged state as well
-        if (merged.sectionAudio && typeof merged.sectionAudio === 'object') {
-          for (const secId in merged.sectionAudio) {
-            if (!cloudState.sectionAudio[secId]) {
-              delete merged.sectionAudio[secId];
-            } else if (typeof merged.sectionAudio[secId] === 'object' && typeof cloudState.sectionAudio[secId] === 'object') {
-              for (const sh in merged.sectionAudio[secId]) {
-                if (!cloudState.sectionAudio[secId][sh]) {
-                  delete merged.sectionAudio[secId][sh];
-                }
-              }
-              if (Object.keys(merged.sectionAudio[secId]).length === 0) {
-                delete merged.sectionAudio[secId];
-              }
-            }
-          }
-        }
+      if (cloudState.sectionAudio && typeof cloudState.sectionAudio === 'object') {
         for (const secId in cloudState.sectionAudio) {
           if (deletedAudioTombstones.has(secId) && (!localState.sectionAudio || !localState.sectionAudio[secId])) {
             continue; // Section audio explicitly deleted locally
@@ -3584,7 +3567,16 @@
               if (deletedAudioTombstones.has(secId + '_' + sh) || deletedAudioTombstones.has(secId)) {
                 continue; // Shift audio explicitly deleted locally
               }
-              merged.sectionAudio[secId][sh] = cloudShifts[sh];
+              const localAudio = merged.sectionAudio[secId] && merged.sectionAudio[secId][sh];
+              const cloudAudio = cloudShifts[sh];
+              if (localAudio && cloudAudio && typeof localAudio === 'object' && typeof cloudAudio === 'object') {
+                const localTime = new Date(localAudio.createdAt || localAudio.localSavedAt || 0).getTime();
+                const cloudTime = new Date(cloudAudio.createdAt || 0).getTime();
+                if (localTime >= cloudTime) {
+                  continue; // Local recording is newer or just saved, do not overwrite with stale cloud
+                }
+              }
+              merged.sectionAudio[secId][sh] = cloudAudio;
             }
           }
         }
@@ -5479,7 +5471,7 @@
                     </div>
                     ${editable ? `
                       <div style="display: flex; align-items: center; gap: 6px;">
-                        <button type="button" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}')" title="إعادة تسجيل الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #0284c7; border-color: #bae6fd; background: white; font-weight: 700;">
+                        <button type="button" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}', '${escapeHtml(targetNoteSh)}')" title="إعادة تسجيل الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #0284c7; border-color: #bae6fd; background: white; font-weight: 700;">
                           🔄 إعادة تسجيل
                         </button>
                         <button type="button" class="btn btn-outline-white btn-sm" onclick="deleteSectionAudio('${escapeHtml(sec.id)}', '${escapeHtml(targetNoteSh)}')" title="حذف الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #dc2626; border-color: #fca5a5; background: white; font-weight: 700;">
@@ -5502,7 +5494,7 @@
               ` : `
                 <!-- Button to start recording if no audio exists and shift is editable -->
                 ${editable ? `
-                  <button type="button" id="btnStartSecVoice_${escapeHtml(sec.id)}" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}')" style="display: ${isRecordingThis ? 'none' : 'inline-flex'}; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #0284c7; border-color: #bae6fd; background: #f0f9ff; padding: 5px 12px; border-radius: 6px;">
+                  <button type="button" id="btnStartSecVoice_${escapeHtml(sec.id)}" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${escapeHtml(sec.id)}', '${escapeHtml(targetNoteSh)}')" style="display: ${isRecordingThis ? 'none' : 'inline-flex'}; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #0284c7; border-color: #bae6fd; background: #f0f9ff; padding: 5px 12px; border-radius: 6px;">
                     🎙️ تسجيل ملاحظة صوتية للقسم
                   </button>
                 ` : ''}
@@ -6155,13 +6147,14 @@
     }
 
     let activeSectionRecordingId = null;
+    let activeSectionRecordingShift = null;
     let sectionMediaRecorder = null;
     let sectionAudioStream = null;
     let sectionAudioChunks = [];
     let sectionRecordTimer = null;
     let sectionRecordSeconds = 0;
 
-    function setSectionAudio(secId, audioData) {
+    function setSectionAudio(secId, audioData, shift) {
       if (!state.sectionAudio || typeof state.sectionAudio !== 'object') {
         state.sectionAudio = {};
       }
@@ -6171,14 +6164,19 @@
       const sections = getBranchSections(currentBranchId, true);
       const sec = sections.find(s => s.id === secId);
       const isSingleShift = isSectionSingleShift(sec, currentBranchId);
-      const targetSh = isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
+      const targetSh = shift || (isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView));
 
       // Clear tombstones for this section and shift
       deletedAudioTombstones.delete(secId + '_' + targetSh);
       deletedAudioTombstones.delete(secId);
       persistAudioTombstones();
 
-      state.sectionAudio[secId][targetSh] = audioData;
+      const audioObj = {
+        ...audioData,
+        localSavedAt: audioData.localSavedAt || Date.now()
+      };
+
+      state.sectionAudio[secId][targetSh] = audioObj;
       expandedSections.add(secId);
       saveState();
       renderAll();
@@ -6235,7 +6233,7 @@
       showToast("🗑️ تم حذف الملاحظة الصوتية");
     }
 
-    async function startSectionVoiceRecording(secId) {
+    async function startSectionVoiceRecording(secId, shift) {
       if (activeSectionRecordingId && activeSectionRecordingId !== secId) {
         alert("يوجد تسجيل صوتي جارٍ لقسم آخر، يرجى حفظه أو إلغاؤه أولاً.");
         return;
@@ -6258,6 +6256,7 @@
         sectionAudioStream = stream;
         sectionAudioChunks = [];
         activeSectionRecordingId = secId;
+        activeSectionRecordingShift = shift || null;
         sectionRecordSeconds = 0;
 
         let mimeType = 'audio/webm';
@@ -6284,6 +6283,8 @@
         };
 
         sectionMediaRecorder.onstop = () => {
+          const recordedDuration = sectionRecordSeconds;
+          const targetRecordingShift = activeSectionRecordingShift;
           const audioBlob = new Blob(sectionAudioChunks, { type: mimeType });
           const reader = new FileReader();
           reader.onloadend = () => {
@@ -6292,12 +6293,13 @@
             const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
             const audioData = {
               audioBase64: base64Audio,
-              duration: sectionRecordSeconds,
+              duration: recordedDuration,
               recordedBy: currentSupervisor || (currentUserRole === 'warehouse_keeper' ? 'أمين المستودع' : 'المشرف'),
               timestamp: timeStr,
-              createdAt: now.toISOString()
+              createdAt: now.toISOString(),
+              localSavedAt: Date.now()
             };
-            setSectionAudio(secId, audioData);
+            setSectionAudio(secId, audioData, targetRecordingShift);
           };
           reader.readAsDataURL(audioBlob);
 
@@ -6306,6 +6308,7 @@
             sectionAudioStream = null;
           }
           activeSectionRecordingId = null;
+          activeSectionRecordingShift = null;
           sectionRecordSeconds = 0;
         };
 
@@ -6326,6 +6329,7 @@
       } catch (err) {
         console.error('Section voice record error:', err);
         activeSectionRecordingId = null;
+        activeSectionRecordingShift = null;
         alert("يرجى إعطاء صلاحية الميكروفون للمتصفح لتتمكن من تسجيل الملاحظة الصوتية.");
       }
     }
@@ -6356,6 +6360,7 @@
         sectionAudioStream = null;
       }
       activeSectionRecordingId = null;
+      activeSectionRecordingShift = null;
       sectionAudioChunks = [];
       sectionRecordSeconds = 0;
       updateSectionVoiceUi(secId, false);
