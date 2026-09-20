@@ -1551,11 +1551,12 @@
     let currentDate = new Date().toISOString().split("T")[0];
     let activeFilter = "all";
 
-    // Operational State: Items per shift, Temperatures per shift, Section Notes per shift
+    // Operational State: Items per shift, Temperatures per shift, Section Notes & Audio per shift
     let state = {
       items: {},          // key: rawId -> { morning: { status, updatedBy, updatedAt, note }, evening: {...}, night: {...} }
       temperatures: {},   // key: tempName -> { morning: { value, updatedBy, updatedAt }, evening: {...}, night: {...} }
-      sectionNotes: {}    // key: sectionId -> { morning: string, evening: string, night: string }
+      sectionNotes: {},   // key: sectionId -> { morning: string, evening: string, night: string }
+      sectionAudio: {}    // key: sectionId -> { morning: object, evening: object, night: object }
     };
 
     // Multi-tab BroadcastChannel for zero-config live sync
@@ -2893,6 +2894,7 @@
       if (!s.items || typeof s.items !== 'object') s.items = {};
       if (!s.temperatures || typeof s.temperatures !== 'object') s.temperatures = {};
       if (!s.sectionNotes || typeof s.sectionNotes !== 'object') s.sectionNotes = {};
+      if (!s.sectionAudio || typeof s.sectionAudio !== 'object') s.sectionAudio = {};
 
       // Prune orphan items not matching SECTIONS_DATA & migrate flat legacy items
       const validRawIds = new Set();
@@ -2981,7 +2983,8 @@
       state = {
         items: {},
         temperatures: {},
-        sectionNotes: {}
+        sectionNotes: {},
+        sectionAudio: {}
       };
     }
 
@@ -3453,6 +3456,12 @@
           copy.sectionNotes[encodeFirebaseKey(k)] = s.sectionNotes[k];
         }
       }
+      if (s.sectionAudio && typeof s.sectionAudio === 'object') {
+        copy.sectionAudio = {};
+        for (const k in s.sectionAudio) {
+          copy.sectionAudio[encodeFirebaseKey(k)] = s.sectionAudio[k];
+        }
+      }
       return copy;
     }
 
@@ -3462,6 +3471,7 @@
         items: {},
         temperatures: {},
         sectionNotes: {},
+        sectionAudio: {},
         handover: cloudVal.handover || {}
       };
       if (cloudVal.items && typeof cloudVal.items === 'object') {
@@ -3479,17 +3489,23 @@
           copy.sectionNotes[decodeFirebaseKey(k)] = cloudVal.sectionNotes[k];
         }
       }
+      if (cloudVal.sectionAudio && typeof cloudVal.sectionAudio === 'object') {
+        for (const k in cloudVal.sectionAudio) {
+          copy.sectionAudio[decodeFirebaseKey(k)] = cloudVal.sectionAudio[k];
+        }
+      }
       return copy;
     }
 
     function mergeDayStates(localState, cloudState) {
-      if (!cloudState) return localState || { items: {}, temperatures: {}, sectionNotes: {} };
+      if (!cloudState) return localState || { items: {}, temperatures: {}, sectionNotes: {}, sectionAudio: {} };
       if (!localState) return cloudState;
 
       const merged = {
         items: { ...(localState.items || {}) },
         temperatures: { ...(localState.temperatures || {}) },
         sectionNotes: { ...(localState.sectionNotes || {}) },
+        sectionAudio: { ...(localState.sectionAudio || {}) },
         handover: cloudState.handover || localState.handover || {}
       };
 
@@ -3527,6 +3543,19 @@
             merged.sectionNotes[secId] = {
               ...merged.sectionNotes[secId],
               ...cloudState.sectionNotes[secId]
+            };
+          }
+        }
+      }
+
+      if (cloudState.sectionAudio) {
+        for (const secId in cloudState.sectionAudio) {
+          if (!merged.sectionAudio[secId] || typeof merged.sectionAudio[secId] !== 'object') {
+            merged.sectionAudio[secId] = cloudState.sectionAudio[secId];
+          } else if (typeof cloudState.sectionAudio[secId] === 'object') {
+            merged.sectionAudio[secId] = {
+              ...merged.sectionAudio[secId],
+              ...cloudState.sectionAudio[secId]
             };
           }
         }
@@ -4971,6 +5000,13 @@
         const header = document.createElement('div');
         header.className = 'section-header' + (isExpanded ? ' active' : ' is-collapsed');
         const cleanTitleEn = (sec.titleEn || '').replace(/^\d+[\.\-\s]+/, '');
+
+        // Check if audio exists for header badge
+        const headerTargetSh = isSingleShift ? 'morning' : (activeShiftView === 'all' ? currentShiftType : activeShiftView);
+        const headerSecAudio = (state.sectionAudio && state.sectionAudio[sec.id]) ?
+          ((typeof state.sectionAudio[sec.id] === 'object' && state.sectionAudio[sec.id][headerTargetSh]) || (typeof state.sectionAudio[sec.id] === 'string' ? state.sectionAudio[sec.id] : null)) : null;
+        const hasSecAudio = !!(headerSecAudio && (typeof headerSecAudio === 'string' ? headerSecAudio : headerSecAudio.audioBase64));
+
         header.innerHTML = `
           <div class="section-title-group">
             <div class="section-num">${idx + 1}</div>
@@ -4983,6 +5019,11 @@
             ${secPhotoCount > 0 ? `
               <span class="section-photo-badge" style="background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;" title="يوجد توثيق بالصور في هذا القسم">
                 📸 ${secPhotoCount} صورة إثبات
+              </span>
+            ` : ''}
+            ${hasSecAudio ? `
+              <span class="section-audio-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;" title="يوجد ملاحظة صوتية مسجلة في هذا القسم">
+                🎙️ صوتي
               </span>
             ` : ''}
             <span class="section-badge ${isFullyDone ? 'completed' : ''}">
@@ -5347,20 +5388,98 @@
           body.appendChild(tempBox);
         }
 
-        // Section Notes
+        // Section Notes & Voice Notes
         if (sec.note) {
           const noteBox = document.createElement('div');
           noteBox.className = 'section-notes-area';
           const targetNoteSh = isSingleShift ? 'morning' : (activeShiftView === 'all' ? currentShiftType : activeShiftView);
-          const savedNote = (state.sectionNotes[sec.id] && typeof state.sectionNotes[sec.id] === 'object') ?
+          const savedNote = (state.sectionNotes && state.sectionNotes[sec.id] && typeof state.sectionNotes[sec.id] === 'object') ?
             (state.sectionNotes[sec.id][targetNoteSh] || '') :
-            (state.sectionNotes[sec.id] || '');
+            ((state.sectionNotes && state.sectionNotes[sec.id]) || '');
+
+          const rawAudio = (state.sectionAudio && state.sectionAudio[sec.id]) ?
+            ((typeof state.sectionAudio[sec.id] === 'object' && state.sectionAudio[sec.id][targetNoteSh]) || (typeof state.sectionAudio[sec.id] === 'string' ? state.sectionAudio[sec.id] : null)) : null;
+          const audioUrl = (rawAudio && typeof rawAudio === 'object') ? (rawAudio.audioBase64 || '') : (typeof rawAudio === 'string' ? rawAudio : '');
+          const hasAudio = !!audioUrl;
           const editable = canEditShift(targetNoteSh);
+          const isRecordingThis = (activeSectionRecordingId === sec.id);
+
           noteBox.innerHTML = `
-            <label>📝 ملاحظات عامة لقسم ${sec.titleAr}:</label>
-            <textarea class="section-notes-textarea" ${!editable ? 'readonly style="background: #f8fafc; cursor: not-allowed;"' : ''}
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+              <label style="margin: 0; font-size: 13px; font-weight: 700; color: var(--text-muted);">
+                📝 ملاحظات عامة لقسم ${escapeHtml(sec.titleAr)}:
+              </label>
+              ${hasAudio ? `
+                <span style="font-size: 11px; font-weight: 800; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 999px; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px;">
+                  🎙️ يوجد تسجيل صوتي
+                </span>
+              ` : ''}
+            </div>
+
+            <textarea id="sectionNotesText_${sec.id}" class="section-notes-textarea" ${!editable ? 'readonly style="background: #f8fafc; cursor: not-allowed;"' : ''}
               placeholder="${editable ? `اكتب أي ملاحظات تخص قسم ${escapeHtml(sec.titleAr)}...` : 'للقراءة فقط...'}" 
               onchange="setSectionNote('${sec.id}', this.value)">${escapeHtml(savedNote)}</textarea>
+
+            <!-- VOICE NOTE CONTROLS / PLAYER -->
+            <div class="section-audio-container" id="sectionAudioContainer_${sec.id}" style="margin-top: 10px;">
+              
+              <!-- Active Recording Box (shown while recording) -->
+              <div id="sectionVoiceRecBox_${sec.id}" class="section-voice-box" style="display: ${isRecordingThis ? 'flex' : 'none'}; align-items: center; justify-content: space-between; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 8px; padding: 8px 12px; gap: 10px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="rec-dot-blink" style="width: 10px; height: 10px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
+                  <span style="font-size: 12px; font-weight: 800; color: #dc2626;">جاري تسجيل الملاحظة الصوتية...</span>
+                  <span id="sectionVoiceTimer_${sec.id}" style="font-family: monospace; font-weight: 800; font-size: 13.5px; color: #dc2626; background: #fee2e2; padding: 2px 6px; border-radius: 4px;">00:00</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <button type="button" class="btn btn-sm btn-primary" onclick="stopSectionVoiceRecording('${sec.id}')" style="background: #059669; border-color: #059669; font-size: 11.5px; padding: 4px 10px; font-weight: 700;">
+                    ⏹️ إيقاف وحفظ
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-white" onclick="cancelSectionVoiceRecording('${sec.id}')" style="font-size: 11.5px; padding: 4px 8px; color: #dc2626; border-color: #fca5a5;">
+                    ❌ إلغاء
+                  </button>
+                </div>
+              </div>
+
+              <!-- Audio Player Box (shown when saved voice note exists) -->
+              ${hasAudio ? `
+                <div class="section-voice-box" style="background: #f0fdf4; border: 1.5px solid #bbf7d0; border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <span style="font-size: 16px;">🎙️</span>
+                      <strong style="font-size: 12px; color: #166534;">الملاحظة الصوتية لقسم (${escapeHtml(sec.titleAr)}):</strong>
+                    </div>
+                    ${editable ? `
+                      <div style="display: flex; align-items: center; gap: 6px;">
+                        <button type="button" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${sec.id}')" title="إعادة تسجيل الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #0284c7; border-color: #bae6fd; background: white; font-weight: 700;">
+                          🔄 إعادة تسجيل
+                        </button>
+                        <button type="button" class="btn btn-outline-white btn-sm" onclick="deleteSectionAudio('${sec.id}')" title="حذف الملاحظة الصوتية" style="padding: 3px 8px; font-size: 11px; color: #dc2626; border-color: #fca5a5; background: white; font-weight: 700;">
+                          🗑️ حذف
+                        </button>
+                      </div>
+                    ` : ''}
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <audio controls src="${audioUrl}" style="height: 34px; flex: 1; min-width: 220px; outline: none; border-radius: 6px;"></audio>
+                    ${(rawAudio && typeof rawAudio === 'object' && (rawAudio.recordedBy || rawAudio.timestamp)) ? `
+                      <div style="font-size: 11px; color: #15803d; font-weight: 700;">
+                        <span>بصوت: <strong>${escapeHtml(rawAudio.recordedBy || 'المشرف')}</strong></span>
+                        ${rawAudio.timestamp ? ` • <span>${escapeHtml(rawAudio.timestamp)}</span>` : ''}
+                        ${rawAudio.duration ? ` • <span>(${rawAudio.duration} ثانية)</span>` : ''}
+                      </div>
+                    ` : ''}
+                  </div>
+                </div>
+              ` : `
+                <!-- Button to start recording if no audio exists and shift is editable -->
+                ${editable ? `
+                  <button type="button" id="btnStartSecVoice_${sec.id}" class="btn btn-outline-white btn-sm" onclick="startSectionVoiceRecording('${sec.id}')" style="display: ${isRecordingThis ? 'none' : 'inline-flex'}; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #0284c7; border-color: #bae6fd; background: #f0f9ff; padding: 5px 12px; border-radius: 6px;">
+                    🎙️ تسجيل ملاحظة صوتية للقسم
+                  </button>
+                ` : ''}
+              `}
+
+            </div>
           `;
           body.appendChild(noteBox);
         }
@@ -5971,7 +6090,10 @@
       setShiftTemperature(tempName, targetSh, value);
     }
 
-    function setSectionNote(secId, note) {
+    function setSectionNote(secId, note, showNotification = true) {
+      if (!state.sectionNotes || typeof state.sectionNotes !== 'object') {
+        state.sectionNotes = {};
+      }
       if (!state.sectionNotes[secId] || typeof state.sectionNotes[secId] !== 'object') {
         state.sectionNotes[secId] = {};
       }
@@ -5981,8 +6103,207 @@
       const targetSh = isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
       state.sectionNotes[secId][targetSh] = note;
       saveState();
-      showToast("تم حفظ ملاحظة القسم");
+      if (showNotification) showToast("تم حفظ ملاحظة القسم");
     }
+
+    /* ============================================================
+       SECTION VOICE NOTES ENGINE (الملاحظات الصوتية للمهام والأقسام)
+       ============================================================ */
+    let activeSectionRecordingId = null;
+    let sectionMediaRecorder = null;
+    let sectionAudioStream = null;
+    let sectionAudioChunks = [];
+    let sectionRecordTimer = null;
+    let sectionRecordSeconds = 0;
+
+    function setSectionAudio(secId, audioData) {
+      if (!state.sectionAudio || typeof state.sectionAudio !== 'object') {
+        state.sectionAudio = {};
+      }
+      if (!state.sectionAudio[secId] || typeof state.sectionAudio[secId] !== 'object') {
+        state.sectionAudio[secId] = {};
+      }
+      const sections = getBranchSections(currentBranchId, true);
+      const sec = sections.find(s => s.id === secId);
+      const isSingleShift = isSectionSingleShift(sec, currentBranchId);
+      const targetSh = isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
+
+      state.sectionAudio[secId][targetSh] = audioData;
+      expandedSections.add(secId);
+      saveState();
+      renderSections(document.getElementById('sectionsContainer'), activeFilter, activeShiftView);
+      showToast("🎙️ تم حفظ الملاحظة الصوتية للقسم");
+    }
+
+    function deleteSectionAudio(secId) {
+      if (!confirm("هل أنت متأكد من حذف الملاحظة الصوتية لهذا القسم؟")) return;
+      if (state.sectionAudio && state.sectionAudio[secId]) {
+        const sections = getBranchSections(currentBranchId, true);
+        const sec = sections.find(s => s.id === secId);
+        const isSingleShift = isSectionSingleShift(sec, currentBranchId);
+        const targetSh = isSingleShift ? 'morning' : ((activeShiftView === 'all') ? currentShiftType : activeShiftView);
+
+        delete state.sectionAudio[secId][targetSh];
+        expandedSections.add(secId);
+        saveState();
+        renderSections(document.getElementById('sectionsContainer'), activeFilter, activeShiftView);
+        showToast("🗑️ تم حذف الملاحظة الصوتية");
+      }
+    }
+
+    async function startSectionVoiceRecording(secId) {
+      if (activeSectionRecordingId && activeSectionRecordingId !== secId) {
+        alert("يوجد تسجيل صوتي جارٍ لقسم آخر، يرجى حفظه أو إلغاؤه أولاً.");
+        return;
+      }
+      if (activeSectionRecordingId === secId) return;
+
+      // Auto-save any written text in the textarea first
+      const ta = document.getElementById(`sectionNotesText_${secId}`);
+      if (ta) {
+        setSectionNote(secId, ta.value, false);
+      }
+
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert("متصفحك لا يدعم تسجيل الصوت المباشر.");
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        sectionAudioStream = stream;
+        sectionAudioChunks = [];
+        activeSectionRecordingId = secId;
+        sectionRecordSeconds = 0;
+
+        let mimeType = 'audio/webm';
+        if (typeof MediaRecorder !== 'undefined') {
+          if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            mimeType = 'audio/webm;codecs=opus';
+          } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+            mimeType = 'audio/mp4';
+          } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+            mimeType = 'audio/ogg';
+          }
+        }
+
+        const options = { mimeType };
+        try {
+          options.audioBitsPerSecond = 32000;
+          sectionMediaRecorder = new MediaRecorder(stream, options);
+        } catch (e) {
+          sectionMediaRecorder = new MediaRecorder(stream, { mimeType });
+        }
+
+        sectionMediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) sectionAudioChunks.push(e.data);
+        };
+
+        sectionMediaRecorder.onstop = () => {
+          const audioBlob = new Blob(sectionAudioChunks, { type: mimeType });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64Audio = reader.result;
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+            const audioData = {
+              audioBase64: base64Audio,
+              duration: sectionRecordSeconds,
+              recordedBy: currentSupervisor || (currentUserRole === 'warehouse_keeper' ? 'أمين المستودع' : 'المشرف'),
+              timestamp: timeStr,
+              createdAt: now.toISOString()
+            };
+            setSectionAudio(secId, audioData);
+          };
+          reader.readAsDataURL(audioBlob);
+
+          if (sectionAudioStream) {
+            sectionAudioStream.getTracks().forEach(t => t.stop());
+            sectionAudioStream = null;
+          }
+          activeSectionRecordingId = null;
+          sectionRecordSeconds = 0;
+        };
+
+        sectionMediaRecorder.start(250);
+        updateSectionVoiceUi(secId, true);
+
+        sectionRecordTimer = setInterval(() => {
+          sectionRecordSeconds++;
+          const secStr = String(sectionRecordSeconds % 60).padStart(2, '0');
+          const minStr = String(Math.floor(sectionRecordSeconds / 60)).padStart(2, '0');
+          const timerEl = document.getElementById(`sectionVoiceTimer_${secId}`);
+          if (timerEl) timerEl.innerText = `${minStr}:${secStr}`;
+          if (sectionRecordSeconds >= 120) { // Max 2 minutes
+            stopSectionVoiceRecording(secId);
+          }
+        }, 1000);
+
+      } catch (err) {
+        console.error('Section voice record error:', err);
+        activeSectionRecordingId = null;
+        alert("يرجى إعطاء صلاحية الميكروفون للمتصفح لتتمكن من تسجيل الملاحظة الصوتية.");
+      }
+    }
+
+    function stopSectionVoiceRecording(secId) {
+      if (sectionRecordTimer) {
+        clearInterval(sectionRecordTimer);
+        sectionRecordTimer = null;
+      }
+      if (sectionMediaRecorder && sectionMediaRecorder.state === 'recording') {
+        sectionMediaRecorder.stop();
+      }
+      updateSectionVoiceUi(secId, false);
+    }
+
+    function cancelSectionVoiceRecording(secId) {
+      if (sectionRecordTimer) {
+        clearInterval(sectionRecordTimer);
+        sectionRecordTimer = null;
+      }
+      if (sectionMediaRecorder && sectionMediaRecorder.state === 'recording') {
+        sectionMediaRecorder.ondataavailable = null;
+        sectionMediaRecorder.onstop = null;
+        sectionMediaRecorder.stop();
+      }
+      if (sectionAudioStream) {
+        sectionAudioStream.getTracks().forEach(t => t.stop());
+        sectionAudioStream = null;
+      }
+      activeSectionRecordingId = null;
+      sectionAudioChunks = [];
+      sectionRecordSeconds = 0;
+      updateSectionVoiceUi(secId, false);
+      renderSections(document.getElementById('sectionsContainer'), activeFilter, activeShiftView);
+      showToast("تم إلغاء التسجيل الصوتي");
+    }
+
+    function updateSectionVoiceUi(secId, isRecording) {
+      const recBox = document.getElementById(`sectionVoiceRecBox_${secId}`);
+      const btnRecord = document.getElementById(`btnStartSecVoice_${secId}`);
+      if (recBox) recBox.style.display = isRecording ? 'flex' : 'none';
+      if (btnRecord) btnRecord.style.display = isRecording ? 'none' : 'inline-flex';
+    }
+
+    // Ensure only one audio player plays at a time across the page
+    document.addEventListener('play', function(e) {
+      if (e.target && e.target.tagName === 'AUDIO') {
+        const audios = document.getElementsByTagName('audio');
+        for (let i = 0; i < audios.length; i++) {
+          if (audios[i] !== e.target) {
+            audios[i].pause();
+          }
+        }
+      }
+    }, true);
+
+    window.setSectionNote = setSectionNote;
+    window.setSectionAudio = setSectionAudio;
+    window.deleteSectionAudio = deleteSectionAudio;
+    window.startSectionVoiceRecording = startSectionVoiceRecording;
+    window.stopSectionVoiceRecording = stopSectionVoiceRecording;
+    window.cancelSectionVoiceRecording = cancelSectionVoiceRecording;
 
     /* ============================================================
        STATS & FILTERS
@@ -8931,7 +9252,7 @@
             // 3. Active in-memory state reset if current branch & current date
             if (bId === currentBranchId && d === currentDate) {
               if (scope === 'all') {
-                state = { items: {}, temperatures: {}, sectionNotes: {}, handover: {} };
+                state = { items: {}, temperatures: {}, sectionNotes: {}, sectionAudio: {}, handover: {} };
                 safeSetItem('diwan_day_ops_' + currentBranchId + '_' + currentDate, JSON.stringify(state));
               } else if (state && state.items) {
                 const sections = getBranchSections(currentBranchId, false);

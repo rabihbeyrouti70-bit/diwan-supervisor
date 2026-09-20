@@ -1702,6 +1702,30 @@
       background: white;
     }
 
+    /* SECTION AUDIO NOTE (RECORDING & PLAYBACK) */
+    .section-audio-container {
+      margin-top: 10px;
+    }
+    .section-audio-container audio {
+      height: 34px;
+      border-radius: 8px;
+      outline: none;
+    }
+    @keyframes recDotPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.85); }
+    }
+    .rec-dot-blink {
+      animation: recDotPulse 1.2s infinite ease-in-out;
+    }
+    [data-theme="dark"] .section-voice-box {
+      background: #1e293b !important;
+      border-color: #334155 !important;
+    }
+    [data-theme="dark"] .section-audio-container audio {
+      filter: invert(0.88) hue-rotate(180deg);
+    }
+
     /* MODALS */
     .modal-overlay {
       position: fixed;
