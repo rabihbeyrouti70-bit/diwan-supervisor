@@ -3577,6 +3577,50 @@
         }
       }
 
+      // Section Audio Sync & Deletion Propagation:
+      const now = Date.now();
+      // 1. Process cloud deletions (if audio exists in merged locally but is absent in cloud, and not just recorded within 15s)
+      if (merged.sectionAudio && typeof merged.sectionAudio === 'object') {
+        const cloudAudioTree = (cloudState.sectionAudio && typeof cloudState.sectionAudio === 'object') ? cloudState.sectionAudio : {};
+        for (const secId in merged.sectionAudio) {
+          const localSecAudio = merged.sectionAudio[secId];
+          const cloudSecAudio = cloudAudioTree[secId];
+
+          if (!cloudSecAudio) {
+            // Whole section audio was removed in cloud
+            if (localSecAudio && typeof localSecAudio === 'object') {
+              for (const sh in localSecAudio) {
+                const a = localSecAudio[sh];
+                const savedAt = (a && typeof a === 'object' && a.localSavedAt) ? a.localSavedAt : 0;
+                if (now - savedAt > 15000) {
+                  delete localSecAudio[sh];
+                }
+              }
+              if (Object.keys(localSecAudio).length === 0) {
+                delete merged.sectionAudio[secId];
+              }
+            } else {
+              delete merged.sectionAudio[secId];
+            }
+          } else if (typeof localSecAudio === 'object' && typeof cloudSecAudio === 'object') {
+            // Specific shifts might have been deleted in cloud
+            for (const sh in localSecAudio) {
+              if (!cloudSecAudio[sh]) {
+                const a = localSecAudio[sh];
+                const savedAt = (a && typeof a === 'object' && a.localSavedAt) ? a.localSavedAt : 0;
+                if (now - savedAt > 15000) {
+                  delete localSecAudio[sh];
+                }
+              }
+            }
+            if (Object.keys(localSecAudio).length === 0) {
+              delete merged.sectionAudio[secId];
+            }
+          }
+        }
+      }
+
+      // 2. Process cloud additions & updates:
       if (cloudState.sectionAudio && typeof cloudState.sectionAudio === 'object') {
         for (const secId in cloudState.sectionAudio) {
           if (typeof isAudioTombstoned === 'function' && isAudioTombstoned(secId, null, cloudState.sectionAudio[secId])) {
@@ -3741,6 +3785,32 @@
                       const sec = getBranchSections(currentBranchId, false).find(s => s.id === sId);
                       const secName = sec ? sec.titleAr : sId;
                       showToast("🎙️ تسجيل صوتي جديد في قسم: " + secName);
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Detect deleted audio notes to notify manager & pause playing audios
+          if (state.sectionAudio && typeof state.sectionAudio === 'object') {
+            const cloudAudioTree = (cloudVal && cloudVal.sectionAudio && typeof cloudVal.sectionAudio === 'object') ? cloudVal.sectionAudio : {};
+            for (const sId in state.sectionAudio) {
+              const localShs = state.sectionAudio[sId];
+              const cloudShs = cloudAudioTree[sId];
+              if (localShs && typeof localShs === 'object') {
+                for (const sh in localShs) {
+                  if (!cloudShs || !cloudShs[sh]) {
+                    const lAudio = localShs[sh];
+                    const savedAt = (lAudio && typeof lAudio === 'object' && lAudio.localSavedAt) ? lAudio.localSavedAt : 0;
+                    if (Date.now() - savedAt > 15000 && Date.now() - lastLocalSaveTime > 2500) {
+                      const sec = getBranchSections(currentBranchId, false).find(s => s.id === sId);
+                      const secName = sec ? sec.titleAr : sId;
+                      showToast("🗑️ تم حذف ملاحظة صوتية لقسم: " + secName);
+                      try {
+                        const audios = document.querySelectorAll('audio');
+                        audios.forEach(a => a.pause());
+                      } catch (e) {}
                     }
                   }
                 }
